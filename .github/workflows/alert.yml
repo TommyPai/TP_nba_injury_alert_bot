@@ -1,0 +1,45 @@
+name: NBA injury alert
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # GitHub 最短 5 分鐘,尖峰時段可能延遲數分鐘
+  workflow_dispatch:
+    inputs:
+      test:
+        description: "只送一則測試通知"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write            # 用來把 state.json 存回 repo
+
+concurrency:
+  group: nba-injury-alert
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      MY_PLAYERS: ${{ vars.MY_PLAYERS }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test notification
+        if: ${{ inputs.test }}
+        run: python3 nba_injury_alert.py --test-notify
+
+      - name: Check injuries
+        if: ${{ !inputs.test }}
+        run: python3 nba_injury_alert.py --once
+
+      - name: Save state
+        if: ${{ !inputs.test }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state.json
+          git diff --cached --quiet || (git commit -m "update state" && git push)
