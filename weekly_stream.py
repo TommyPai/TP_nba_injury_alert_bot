@@ -102,6 +102,9 @@ def main():
 
     start = datetime.strptime(args.week, "%Y-%m-%d").date() if args.week else week_start()
     games, team_ids = games_this_week(start)
+    if not games and not args.week:  # 本週沒有例行賽(例如季前)就改看下一週
+        start += timedelta(days=7)
+        games, team_ids = games_this_week(start)
     if not games:
         print("本週沒有例行賽")
         return
