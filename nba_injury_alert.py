@@ -241,9 +241,10 @@ def line(s):
             f"{s['stl']:.1f}抄 {s['blk']:.1f}阻 {s['fg3m']:.1f}三")
 
 
-def suggest_replacements(cache, inj, stats, year, out_ids, cfg):
+def suggest_replacements(cache, inj, stats, year, out_ids, cfg, taken_ids=frozenset()):
+    # taken_ids:聯盟裡已被選走的人,有接上 ESPN 聯盟時只推薦撿得到的自由球員
     roster = [p for p in get_roster(cache, inj["tid"])
-              if p["id"] != inj["pid"] and p["id"] not in out_ids]
+              if p["id"] != inj["pid"] and p["id"] not in out_ids and p["id"] not in taken_ids]
     with ThreadPoolExecutor(max_workers=8) as ex:
         all_stats = list(ex.map(lambda p: get_stats(cache, p["id"], year, cfg), roster))
     group = POS_GROUP.get(inj["pos"])
@@ -260,9 +261,9 @@ def suggest_replacements(cache, inj, stats, year, out_ids, cfg):
     return [(p, s, bench) for bench, _, p, s in cands[:cfg["replacements"]]]
 
 
-def build_message(inj, stats, reps, cfg):
+def build_message(inj, stats, reps, cfg, mine_ids=frozenset(), free_agents_only=False):
     emoji, zh = STATUS_ZH.get(inj["status"], ("⚠️", inj["status"]))
-    mine = "⭐你的球員 " if inj["name"] in cfg["my_players"] else ""
+    mine = "⭐你的球員 " if inj["pid"] in mine_ids or inj["name"] in cfg["my_players"] else ""
     gp = int(stats.get("gp", 0))
     role = f"先發 {int(stats.get('gs', 0))}/{gp}" if gp else "無出賽紀錄"
     head = f"{emoji} {mine}[{inj['team']}] {inj['name']} {zh}({inj['status']})"
@@ -275,7 +276,7 @@ def build_message(inj, stats, reps, cfg):
     body.append("  " + line(stats))
     short = []
     if reps:
-        body.append("建議關注:")
+        body.append("建議撿(你聯盟的自由球員):" if free_agents_only else "建議關注:")
         for i, (p, s, bench) in enumerate(reps, 1):
             tag = "替補" if bench else "先發"
             body.append(f"{i}. {p['name']} ({p['pos']},{tag}) {line(s)}")
@@ -355,12 +356,17 @@ def check(cfg, cache, state, dry, alert_existing):
         log(f"首次執行:目前共 {len(rows)} 則傷病,"
             + ("僅列出不推播(加 --alert-existing 可一併推播)" if silent else "全部依規則推播"))
     hits = 0
+    league = None  # 有關鍵傷病時才連 ESPN 聯盟,平常每 5 分鐘的檢查不打擾 ESPN
     for inj, s in zip(new, stats_list):
         if not is_key_player(s, cfg):
             continue
         hits += 1
-        reps = suggest_replacements(cache, inj, s, year, out_ids, cfg)
-        head, body, short = build_message(inj, s, reps, cfg)
+        if league is None and not silent:
+            from espn_league import league_sets
+            league = league_sets()
+        taken, mine = league or (frozenset(), frozenset())
+        reps = suggest_replacements(cache, inj, s, year, out_ids, cfg, taken)
+        head, body, short = build_message(inj, s, reps, cfg, mine, bool(taken))
         print(f"\n{'=' * 60}\n{head}\n{body}", flush=True)
         if not dry and not silent:
             notify(cfg, head, body, short)
