@@ -14,6 +14,7 @@
     python weekly_stream.py --dry    只印出，不推播
 """
 import argparse
+import html
 import re
 import sys
 import unicodedata
@@ -127,7 +128,24 @@ def compare(me, opp):
 
 
 def fmt(k, v):
-    return f"{v * 100:.1f}%" if k in ("fg", "ft") else f"{v:.0f}"
+    return f"{v * 100:.1f}" if k in ("fg", "ft") else f"{v:.0f}"
+
+
+# 表格用英文縮寫:中文字在 Telegram 的等寬字體裡寬度不固定,會把欄位擠歪
+ABBR = {"pts": "PTS", "reb": "REB", "ast": "AST", "stl": "STL", "blk": "BLK", "tpm": "3PM",
+        "fg": "FG%", "ft": "FT%", "tov": "TO"}
+MARK = {"win": "✅", "close": "⚖️", "lose": "❌"}
+
+
+def matchup_table(res):
+    rows = ["CAT     YOU    OPP"]
+    rows += [f"{ABBR[k]:<4}{fmt(k, a):>7}{fmt(k, b):>7} {MARK[t]}" for _, k, a, b, t in res]
+    return "\n".join(rows)
+
+
+def to_html(blocks):
+    """blocks 是 (文字, 是否表格) 的清單;一般文字跳脫成 HTML,表格包成 <pre> 等寬顯示。"""
+    return "\n".join(f"<pre>{html.escape(t)}</pre>" if pre else html.escape(t) for t, pre in blocks)
 
 
 def main():
@@ -178,7 +196,8 @@ def main():
             lines.append(f"領先:{group('win')}")
             lines.append(f"拉鋸:{group('close')}  ← 這週的勝負關鍵")
             lines.append(f"落後:{group('lose')}")
-            lines.append("預估(你/對手):" + " ".join(f"{n} {fmt(k, a)}/{fmt(k, b)}" for n, k, a, b, _ in res))
+            lines.append(("table", matchup_table(res)))
+            lines.append("✅領先 ⚖️拉鋸 ❌落後;FG%、FT% 是命中率,TO 越少越好")
             lines.append("")
             boost = tuple(k for _, k, _, _, t in res if t == "close")
         elif me is None:
@@ -221,10 +240,11 @@ def main():
     if not lg:
         lines.append("")
         lines.append("請先到聯盟確認他們還是自由球員。")
-    body = "\n".join(lines)
-    print(head + "\n" + body)
+    # lines 裡的 ("table", 文字) 是要用等寬字體顯示的表格
+    blocks = [(l[1], True) if isinstance(l, tuple) else (l, False) for l in lines]
+    print(head + "\n" + "\n".join(t for t, _ in blocks))
     if not args.dry:
-        notify(load_config(), head, body, "")
+        notify(load_config(), head, to_html(blocks), "", html=True)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@
     python nba_injury_alert.py --alert-existing 第一次執行也把目前已有的傷病全部推播
 """
 import argparse
+import html as html_lib
 import json
 import os
 import re
@@ -340,20 +341,26 @@ def toast(title, text):
                    capture_output=True, timeout=20)
 
 
-def notify(cfg, head, body, short):
+def notify(cfg, head, body, short, html=False):
+    """html=True 時 body 是 Telegram HTML(可含 <pre> 等寬表格),其他通道自動轉成純文字。"""
     n = cfg["notify"]
-    full = f"{head}\n{body}"
+    plain = html_lib.unescape(re.sub(r"</?pre>", "", body)) if html else body
+    if html:
+        tg_payload = {"chat_id": n["telegram_chat_id"], "parse_mode": "HTML",
+                      "text": f"<b>{html_lib.escape(head)}</b>\n{body}"[:4000]}
+    else:
+        tg_payload = {"chat_id": n["telegram_chat_id"], "text": f"{head}\n{body}"[:4000]}
+    discord_body = re.sub(r"</?pre>", "```", html_lib.unescape(body)) if html else body
     channels = [
         ("Windows 通知", n["windows_toast"] and sys.platform == "win32",
-         lambda: toast(head, short or body[:120])),
+         lambda: toast(head, short or plain[:120])),
         ("Discord", n["discord_webhook"],
-         lambda: post_json(n["discord_webhook"], {"content": f"**{head}**\n{body}"[:1990]})),
+         lambda: post_json(n["discord_webhook"], {"content": f"**{head}**\n{discord_body}"[:1990]})),
         ("Telegram", n["telegram_bot_token"] and n["telegram_chat_id"],
-         lambda: post_json(f"https://api.telegram.org/bot{n['telegram_bot_token']}/sendMessage",
-                           {"chat_id": n["telegram_chat_id"], "text": full[:4000]})),
+         lambda: post_json(f"https://api.telegram.org/bot{n['telegram_bot_token']}/sendMessage", tg_payload)),
         ("ntfy", n["ntfy_topic"],
          lambda: post_json("https://ntfy.sh/", {"topic": n["ntfy_topic"], "title": head,
-                                                "message": body, "priority": 4})),
+                                                "message": plain, "priority": 4})),
     ]
     for name, enabled, fn in channels:
         if not enabled:
