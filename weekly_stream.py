@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import espn_league
-from blend import blend
+from blend import blended_stats, season_stats as _season_stats
 from nba_injury_alert import get_json, load_config, notify
 
 BASE = Path(__file__).resolve().parent
@@ -73,23 +73,12 @@ def games_this_week(start):
 
 
 def season_stats(pid, year):
-    d = get_json(STATS.format(year=year, pid=pid))
-    if not d:
-        return None
-    s = {}
-    for cat in d.get("splits", {}).get("categories", []):
-        for x in cat.get("stats", []):
-            if x["name"] in KEYS:
-                s[KEYS[x["name"]]] = float(x["value"])
-    for k in ("ftp", "fgp"):
-        if s.get(k, 0) > 1:
-            s[k] /= 100
-    return s if s.get("gp") else None
+    return _season_stats(pid, year, get_json)
 
 
 def player_stats(pid, year):
     """今年和去年混合評估(見 blend.py):上場時間最快反映今年角色,產量和命中率逐場增加今年的權重。"""
-    return blend(season_stats(pid, year), season_stats(pid, year - 1))
+    return blended_stats(pid, year, get_json)
 
 
 def cade_value(s, boost=()):

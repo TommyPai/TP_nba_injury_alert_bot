@@ -26,3 +26,47 @@ def blend(cur, prev):
     for k in ("fgp", "ftp"):
         out[k] = w(K_PCT) * cur.get(k, 0) + (1 - w(K_PCT)) * prev.get(k, 0)
     return out
+
+
+# ---------- 抓數據(兩邊共用;get_json 由呼叫端傳入,避免循環 import) ----------
+
+STATS_URL = ("https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/"
+             "seasons/{year}/types/2/athletes/{pid}/statistics")
+KEYS = {"gamesPlayed": "gp", "gamesStarted": "gs", "avgMinutes": "min", "avgPoints": "pts",
+        "avgRebounds": "reb", "avgAssists": "ast", "avgSteals": "stl", "avgBlocks": "blk",
+        "avgTurnovers": "tov", "avgThreePointFieldGoalsMade": "tpm", "avgFreeThrowsAttempted": "fta",
+        "freeThrowPct": "ftp", "avgFieldGoalsAttempted": "fga", "fieldGoalPct": "fgp"}
+
+
+def season_stats(pid, year, get_json):
+    d = get_json(STATS_URL.format(year=year, pid=pid))
+    if not d:
+        return None
+    s = {}
+    for cat in d.get("splits", {}).get("categories", []):
+        for x in cat.get("stats", []):
+            if x["name"] in KEYS:
+                s[KEYS[x["name"]]] = float(x["value"])
+    for k in ("ftp", "fgp"):
+        if s.get(k, 0) > 1:
+            s[k] /= 100
+    return s if s.get("gp") else None
+
+
+def blended_stats(pid, year, get_json):
+    """今年 + 去年混合後的場均;另外附上今年實際的場數、分鐘(cur_min)。"""
+    cur = season_stats(pid, year, get_json)
+    out = blend(cur, season_stats(pid, year - 1, get_json))
+    if out is not None:
+        out["cur_min"] = cur["min"] if cur else None
+    return out
+
+
+def cade_per_min(s):
+    """Cade 打法(得分、3PM、罰球、助攻、抄截;不計失誤)的每分鐘價值。"""
+    if not s or not s.get("min"):
+        return 0.0
+    ft = (s.get("ftp", 0.78) - 0.78) * s.get("fta", 0)
+    v = (s.get("pts", 0) + 3.0 * s.get("tpm", 0) + 1.2 * s.get("ast", 0) + 2.5 * s.get("stl", 0)
+         + 0.4 * s.get("reb", 0) + 1.0 * s.get("blk", 0) + 6 * ft)
+    return v / s["min"]

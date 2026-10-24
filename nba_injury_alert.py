@@ -25,6 +25,8 @@ import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+
+from blend import blended_stats, cade_per_min
 from datetime import datetime
 from pathlib import Path
 
@@ -241,24 +243,50 @@ def line(s):
             f"{s['stl']:.1f}抄 {s['blk']:.1f}阻 {s['fg3m']:.1f}三")
 
 
-def suggest_replacements(cache, inj, stats, year, out_ids, cfg, taken_ids=frozenset()):
-    # taken_ids:聯盟裡已被選走的人,有接上 ESPN 聯盟時只推薦撿得到的自由球員
+# 傷兵和候選人的位置組別:同組全額、相鄰組(後衛-前鋒、前鋒-中鋒)打對折,其餘幾乎不會接手
+POS_FIT = {("G", "G"): 1.0, ("F", "F"): 1.0, ("C", "C"): 1.0,
+           ("G", "F"): 0.5, ("F", "G"): 0.5, ("F", "C"): 0.5, ("C", "F"): 0.5}
+
+
+def suggest_replacements(cache, inj, stats, year, hurt_ids, cfg, taken_ids=frozenset()):
+    """推薦最可能接手傷兵上場時間、而且接手後在 Cade 打法下產出最多的隊友。
+
+    - 排除同隊所有在傷病名單上的人(含每日觀察),以及聯盟已被選走的人(有接 ESPN 時)
+    - 數據用今年 + 去年混合(blend.py),今年的上場時間會很快反映新角色
+    - 預估分鐘 = 目前分鐘 + 可分到的傷兵時間(最多 40%,依位置相符程度打折,上限 34 分鐘)
+    - 開季後今年沒上場、或每場不到 8 分鐘的人不推薦(不在輪替裡)
+    - 只推薦預估能多拿 3 分鐘以上的人,依「預估分鐘 × 每分鐘價值」排序
+    """
     roster = [p for p in get_roster(cache, inj["tid"])
-              if p["id"] != inj["pid"] and p["id"] not in out_ids and p["id"] not in taken_ids]
+              if p["id"] != inj["pid"] and p["id"] not in hurt_ids and p["id"] not in taken_ids]
     with ThreadPoolExecutor(max_workers=8) as ex:
-        all_stats = list(ex.map(lambda p: get_stats(cache, p["id"], year, cfg), roster))
+        all_stats = list(ex.map(lambda p: blended_stats(p["id"], year, get_json), roster))
     group = POS_GROUP.get(inj["pos"])
+    inj_min = stats.get("min") or 28
     cands = []
     for p, s in zip(roster, all_stats):
-        if s.get("min", 0) < cfg["replacement_min_minutes"]:
+        if not s or s.get("min", 0) < 10:
             continue
-        gp = s.get("gp", 0)
-        bench = not (gp > 0 and s.get("gs", 0) / gp >= cfg["starter_ratio"])
-        bonus = 1.15 if group and POS_GROUP.get(p["pos"]) == group else 1.0
-        cands.append((bench, fantasy_score(s, cfg) * bonus, p, s))
-    # 替補優先(最可能因此多拿到上場時間,也最可能在自由球員名單);不足再補先發
-    cands.sort(key=lambda c: (not c[0], -c[1]))
-    return [(p, s, bench) for bench, _, p, s in cands[:cfg["replacements"]]]
+        # 開季後今年還沒上場,或上場但每場不到 8 分鐘,代表不在輪替裡
+        if not s.get("cur_gp") or (s.get("cur_min") or 0) < 8:
+            continue
+        fit = POS_FIT.get((group, POS_GROUP.get(p["pos"])), 0.15) if group else 0.6
+        gain = min(max(0.0, 34 - s["min"]), inj_min * 0.4) * fit
+        if gain < 3:
+            continue
+        new_min = s["min"] + gain
+        cands.append((cade_per_min(s) * new_min, p, s, new_min))
+    cands.sort(key=lambda c: -c[0])
+    return [(p, s, new_min) for _, p, s, new_min in cands[:cfg["replacements"]]]
+
+
+def rep_line(s, new_min):
+    """依預估分鐘換算的場均產出。"""
+    f = new_min / s["min"]
+    cur = f"今年{int(s['cur_gp'])}場{s['cur_min']:.0f}分鐘" if s.get("cur_gp") and s.get("cur_min") else "今年未出賽"
+    return (f"{cur} → 預估{new_min:.0f}分鐘 | {s.get('pts', 0) * f:.1f}分 {s.get('reb', 0) * f:.1f}板 "
+            f"{s.get('ast', 0) * f:.1f}助 {s.get('stl', 0) * f:.1f}抄 {s.get('blk', 0) * f:.1f}帽 "
+            f"{s.get('tpm', 0) * f:.1f}三 罰球{s.get('ftp', 0) * 100:.0f}%")
 
 
 def build_message(inj, stats, reps, cfg, mine_ids=frozenset(), free_agents_only=False):
@@ -277,12 +305,11 @@ def build_message(inj, stats, reps, cfg, mine_ids=frozenset(), free_agents_only=
     short = []
     if reps:
         body.append("建議撿(你聯盟的自由球員):" if free_agents_only else "建議關注:")
-        for i, (p, s, bench) in enumerate(reps, 1):
-            tag = "替補" if bench else "先發"
-            body.append(f"{i}. {p['name']} ({p['pos']},{tag}) {line(s)}")
+        for i, (p, s, new_min) in enumerate(reps, 1):
+            body.append(f"{i}. {p['name']} ({p['pos']}) {rep_line(s, new_min)}")
             short.append(p["name"])
     else:
-        body.append("(找不到合適的同隊替補)")
+        body.append("(同隊沒有明顯會多拿上場時間的人)")
     return head, "\n".join(body), ("可關注:" + "、".join(short)) if short else ""
 
 
@@ -345,7 +372,7 @@ def check(cfg, cache, state, dry, alert_existing):
     rows = [r for r in parse_injuries(data) if r["status"] not in cfg["ignore_statuses"]]
     first_run = "seen" not in state
     seen = set(state.get("seen", []))
-    out_ids = {r["pid"] for r in rows if r["status"] in ("Out", "Doubtful", "Suspension")}
+    hurt_ids = {r["pid"] for r in rows if r["status"] in ("Out", "Doubtful", "Day-To-Day", "Suspension")}
 
     new = [r for r in rows if f"{r['pid']}:{r['status']}" not in seen]
     with ThreadPoolExecutor(max_workers=8) as ex:  # 先平行抓新傷兵的數據
@@ -365,7 +392,7 @@ def check(cfg, cache, state, dry, alert_existing):
             from espn_league import league_sets
             league = league_sets()
         taken, mine = league or (frozenset(), frozenset())
-        reps = suggest_replacements(cache, inj, s, year, out_ids, cfg, taken)
+        reps = suggest_replacements(cache, inj, s, year, hurt_ids, cfg, taken)
         head, body, short = build_message(inj, s, reps, cfg, mine, bool(taken))
         print(f"\n{'=' * 60}\n{head}\n{body}", flush=True)
         if not dry and not silent:
