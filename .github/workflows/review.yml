@@ -1,0 +1,26 @@
+name: Matchup review
+
+on:
+  workflow_dispatch:
+    inputs:
+      last:
+        description: "分析上一週(預設是本週到目前為止)"
+        type: boolean
+        default: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      ESPN_S2: ${{ secrets.ESPN_S2 }}
+      ESPN_SWID: ${{ secrets.ESPN_SWID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install espn_api
+        run: python3 -m pip install --quiet espn_api || python3 -m pip install --quiet --break-system-packages espn_api
+
+      - name: Send matchup review
+        run: python3 matchup_review.py ${{ inputs.last && '--last' || '' }}
