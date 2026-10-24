@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import espn_league
+from blend import blend
 from nba_injury_alert import get_json, load_config, notify
 
 BASE = Path(__file__).resolve().parent
@@ -87,11 +88,8 @@ def season_stats(pid, year):
 
 
 def player_stats(pid, year):
-    """本季出賽 5 場以上用本季，否則用上一季；兩者都沒有就不列入(避免兩三場的小樣本)。"""
-    cur = season_stats(pid, year)
-    if cur and cur["gp"] >= 5:
-        return cur
-    return season_stats(pid, year - 1)
+    """今年和去年混合評估(見 blend.py):上場時間最快反映今年角色,產量和命中率逐場增加今年的權重。"""
+    return blend(season_stats(pid, year), season_stats(pid, year - 1))
 
 
 def cade_value(s, boost=()):
@@ -224,7 +222,7 @@ def main():
     lines.append("")
     who = "你聯盟的自由球員" if lg else "還沒被選走"
     focus = f",拉鋸類別加權" if boost else ""
-    lines.append(f"建議串流（{who}、場均 20 分鐘以上，依 Cade 打法 × 本週場數排序{focus}）：")
+    lines.append(f"建議串流（{who}、混合今年與去年後場均 20 分鐘以上，依 Cade 打法 × 本週場數排序{focus}）：")
     for i, (_, name, abbr, s) in enumerate(cands[:TOP_N], 1):
         lines.append(f"{i}. {name} ({abbr}，{games[abbr]}場) {s.get('pts', 0):.1f}分 {s.get('tpm', 0):.1f}三 "
                      f"{s.get('ast', 0):.1f}助 {s.get('stl', 0):.1f}抄 {s.get('blk', 0):.1f}帽 "
