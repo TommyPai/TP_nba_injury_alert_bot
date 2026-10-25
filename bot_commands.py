@@ -4,6 +4,7 @@
 跟著每 5 分鐘的傷病檢查一起執行:讀取你傳給機器人的指令,執行對應的報告後推播回來。
 只回應 config / Secrets 裡設定的那個聊天室,其他人傳的指令一律忽略。
 """
+import argparse
 import json
 import subprocess
 import sys
@@ -31,7 +32,7 @@ HELP = """所有功能
 🚑 /injuries 你的球員傷病現況
 🚨 傷病通知:每 5 分鐘自動檢查,先發或主力受傷時推播
 
-點選單後約 5 到 15 分鐘回覆(機器人每 5 分鐘醒來一次)。"""
+點選單後:設好 Cloudflare 門鈴約 1 到 2 分鐘回覆;沒設的話約 5 到 15 分鐘(每 5 分鐘醒來一次)。"""
 
 
 def tg(token, method, payload):
@@ -58,10 +59,32 @@ def my_injuries():
                      f"{',在 IL 位' if p.lineupSlot == 'IR' else ''}" for p in hurt)
 
 
+def run_command(cfg, cmd):
+    log(f"執行指令 /{cmd}")
+    script = next(s for c, _, s in COMMANDS if c == cmd)
+    try:
+        if cmd == "help":
+            notify(cfg, "ℹ️ 機器人功能", HELP, "")
+        elif cmd == "injuries":
+            notify(cfg, "🚑 我的球員傷病現況", my_injuries(), "")
+        else:
+            subprocess.run([sys.executable, *script], cwd=BASE, timeout=420, check=True)
+    except Exception as e:
+        log(f"/{cmd} 失敗:{e}")
+        notify(cfg, f"⚠️ /{cmd} 執行失敗", str(e)[:300], "")
+
+
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--run", choices=[c for c, _, _ in COMMANDS],
+                    help="直接執行一個指令(Cloudflare 門鈴觸發的 GitHub 工作用)")
+    args = ap.parse_args()
     cfg = load_config()
     token, chat = cfg["notify"]["telegram_bot_token"], str(cfg["notify"]["telegram_chat_id"])
     if not (token and chat):
+        return
+    if args.run:
+        run_command(cfg, args.run)
         return
     state = load_json(STATE_PATH, {})
     before = json.dumps(state, sort_keys=True)
@@ -72,6 +95,12 @@ def main():
         tg(token, "setMyCommands", {"commands": [{"command": c, "description": d} for c, d, _ in COMMANDS]})
         state["tg_commands"] = sig
         log("已更新 Telegram 指令選單")
+
+    # 設了 Cloudflare 門鈴(webhook)之後,指令由它即時處理;Telegram 也不允許同時用 getUpdates
+    if (tg(token, "getWebhookInfo", {}).get("result") or {}).get("url"):
+        if json.dumps(state, sort_keys=True) != before:
+            save_json(STATE_PATH, state)
+        return
 
     todo = []
     for u in tg(token, "getUpdates", {"offset": state.get("tg_offset", 0), "timeout": 0,
@@ -90,18 +119,7 @@ def main():
         save_json(STATE_PATH, state)
 
     for cmd in todo:
-        log(f"執行指令 /{cmd}")
-        script = next(s for c, _, s in COMMANDS if c == cmd)
-        try:
-            if cmd == "help":
-                notify(cfg, "ℹ️ 機器人功能", HELP, "")
-            elif cmd == "injuries":
-                notify(cfg, "🚑 我的球員傷病現況", my_injuries(), "")
-            else:
-                subprocess.run([sys.executable, *script], cwd=BASE, timeout=420, check=True)
-        except Exception as e:
-            log(f"/{cmd} 失敗:{e}")
-            notify(cfg, f"⚠️ /{cmd} 執行失敗", str(e)[:300], "")
+        run_command(cfg, cmd)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,28 @@
+name: Bot command
+
+# 由 Cloudflare 門鈴觸發(你在 Telegram 點選單時),也可以在 GitHub 上手動執行
+on:
+  workflow_dispatch:
+    inputs:
+      cmd:
+        description: "要執行的指令"
+        required: true
+        type: choice
+        options: [daily, weekly, review, lastweek, injuries, help]
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      ESPN_S2: ${{ secrets.ESPN_S2 }}
+      ESPN_SWID: ${{ secrets.ESPN_SWID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install espn_api
+        run: python3 -m pip install --quiet espn_api || python3 -m pip install --quiet --break-system-packages espn_api
+
+      - name: Run command
+        run: python3 bot_commands.py --run "${{ inputs.cmd }}"
