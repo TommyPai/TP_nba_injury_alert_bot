@@ -44,9 +44,29 @@ def my_team(lg):
     return None
 
 
+def pending_adds(lg, hours=36):
+    """最近已撿、但還沒生效的球員。ESPN 在當天陣容鎖定後的異動,要到下一個計分日才會出現在陣容裡。"""
+    import time
+    ids = set()
+    try:
+        for a in lg.recent_activity(size=50):
+            if time.time() - a.date / 1000 > hours * 3600:
+                break
+            for act in a.actions:
+                if "ADDED" not in str(act[1]) or len(act) < 3:
+                    continue
+                player = act[2]  # 異動紀錄裡只有球員名字,用聯盟的對照表換回 ID
+                pid = getattr(player, "playerId", None) or lg.player_map.get(player)
+                if pid is not None:
+                    ids.add(str(pid))
+    except Exception as e:  # 異動紀錄讀不到時,至少還有陣容資料可用
+        print(f"讀不到聯盟異動紀錄:{e}", flush=True)
+    return ids
+
+
 def rostered_ids(lg):
-    """聯盟裡所有已被選走的球員(ESPN 球員 ID,字串)。"""
-    return {str(p.playerId) for t in lg.teams for p in t.roster}
+    """聯盟裡所有已被選走的球員(ESPN 球員 ID,字串),包含已撿但明天才生效的人。"""
+    return {str(p.playerId) for t in lg.teams for p in t.roster} | pending_adds(lg)
 
 
 def opponent(lg, me, period=None):
