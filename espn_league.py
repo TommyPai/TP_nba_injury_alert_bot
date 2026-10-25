@@ -49,9 +49,9 @@ def rostered_ids(lg):
     return {str(p.playerId) for t in lg.teams for p in t.roster}
 
 
-def opponent(lg, me):
-    """本週對戰對手。"""
-    for m in lg.scoreboard():
+def opponent(lg, me, period=None):
+    """指定週(預設本週)的對戰對手。"""
+    for m in lg.scoreboard(period):
         home = getattr(m.home_team, "team_id", m.home_team)
         away = getattr(m.away_team, "team_id", m.away_team)
         if home == me.team_id:

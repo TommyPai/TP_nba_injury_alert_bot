@@ -58,11 +58,13 @@ def week_start():
 
 
 def games_this_week(start):
-    games, team_ids = {}, {}
+    """回傳 (每隊場數, 球隊 ID, 每天有比賽的球隊清單)。"""
+    games, team_ids, day_teams = {}, {}, []
     days = [start + timedelta(days=i) for i in range(7)]
     with ThreadPoolExecutor(7) as ex:
         boards = list(ex.map(lambda d: get_json(SCOREBOARD.format(d=d.strftime("%Y%m%d"))) or {}, days))
     for b in boards:
+        today = set()
         for e in b.get("events", []):
             if e.get("season", {}).get("type") != 2:
                 continue
@@ -70,7 +72,9 @@ def games_this_week(start):
                 abbr = c["team"]["abbreviation"]
                 games[abbr] = games.get(abbr, 0) + 1
                 team_ids[abbr] = c["team"]["id"]
-    return games, team_ids
+                today.add(abbr)
+        day_teams.append(today)
+    return games, team_ids, day_teams
 
 
 def season_stats(pid, year):
@@ -94,22 +98,34 @@ def cade_value(s, boost=()):
             + ft_impact * 6 * b("ft") + fg_impact * 3 * (b("fg") - 1))
 
 
-def project(players, games, pid_team, year):
-    """一隊本週的預估九類總量(場均 × 本週場數;IR 和確定缺陣的不算)。"""
+def active_slots(team):
+    """每天的先發位置數:陣容裡目前不在板凳(BE)和傷兵(IR)位的人數,判斷不出來就用 10。"""
+    n = sum(1 for p in team.roster if p.lineupSlot not in ("BE", "IR", ""))
+    return n if 5 <= n <= 15 else 10
+
+
+def project(players, day_teams, pid_team, year, slots):
+    """一隊本週的預估九類總量。
+    逐日計算:當天有比賽的人裡,只有價值最高的 slots 個能排進先發、數據才算數(板凳不算);
+    IR 和確定缺陣的不算。"""
     tot = dict.fromkeys(["pts", "reb", "ast", "stl", "blk", "tpm", "tov", "fga", "fgm", "fta", "ftm"], 0.0)
+    pool = []
     for p in players:
         if p.lineupSlot == "IR" or (p.injuryStatus or "").upper() == "OUT":
             continue
-        g = games.get(pid_team.get(str(p.playerId)), 0)
-        s = player_stats(p.playerId, year) if g else None
-        if not s:
-            continue
-        for k in ("pts", "reb", "ast", "stl", "blk", "tpm", "tov"):
-            tot[k] += s.get(k, 0) * g
-        tot["fga"] += s.get("fga", 0) * g
-        tot["fgm"] += s.get("fga", 0) * s.get("fgp", 0) * g
-        tot["fta"] += s.get("fta", 0) * g
-        tot["ftm"] += s.get("fta", 0) * s.get("ftp", 0) * g
+        team = pid_team.get(str(p.playerId))
+        s = player_stats(p.playerId, year) if team else None
+        if s:
+            pool.append((team, s, cade_value(s)))
+    for today in day_teams:
+        starters = sorted((x for x in pool if x[0] in today), key=lambda x: -x[2])[:slots]
+        for _, s, _ in starters:
+            for k in ("pts", "reb", "ast", "stl", "blk", "tpm", "tov"):
+                tot[k] += s.get(k, 0)
+            tot["fga"] += s.get("fga", 0)
+            tot["fgm"] += s.get("fga", 0) * s.get("fgp", 0)
+            tot["fta"] += s.get("fta", 0)
+            tot["ftm"] += s.get("fta", 0) * s.get("ftp", 0)
     tot["fg"] = tot["fgm"] / tot["fga"] if tot["fga"] else 0
     tot["ft"] = tot["ftm"] / tot["fta"] if tot["fta"] else 0
     return tot
@@ -157,10 +173,12 @@ def main():
     args = ap.parse_args()
 
     start = datetime.strptime(args.week, "%Y-%m-%d").date() if args.week else week_start()
-    games, team_ids = games_this_week(start)
+    games, team_ids, day_teams = games_this_week(start)
     if not games and not args.week:  # 本週沒有例行賽(例如季前)就改看下一週
         start += timedelta(days=7)
-        games, team_ids = games_this_week(start)
+        games, team_ids, day_teams = games_this_week(start)
+    today_et = (datetime.now(timezone.utc) - timedelta(hours=4)).date()
+    weeks_ahead = max(0, (start - (today_et - timedelta(days=today_et.weekday()))).days // 7)
     if not games:
         print("本週沒有例行賽")
         return
@@ -186,10 +204,12 @@ def main():
     if lg:
         taken = espn_league.rostered_ids(lg)
         is_free = lambda pid, name: pid not in taken
-        opp = espn_league.opponent(lg, me) if me else None
+        # 往後看下一週時(例如週日執行),對手也要抓下一週的
+        opp = espn_league.opponent(lg, me, lg.currentMatchupPeriod + weeks_ahead) if me else None
         if me and opp:
-            mine_p = project(me.roster, games, pid_team, year)
-            opp_p = project(opp.roster, games, pid_team, year)
+            slots = active_slots(me)
+            mine_p = project(me.roster, day_teams, pid_team, year, slots)
+            opp_p = project(opp.roster, day_teams, pid_team, year, slots)
             res = compare(mine_p, opp_p)
             group = lambda tag: "、".join(n for n, _, _, _, t in res if t == tag) or "無"
             lines.append(f"🆚 本週對手:{opp.team_name}")
@@ -197,7 +217,7 @@ def main():
             lines.append(f"拉鋸:{group('close')}  ← 這週的勝負關鍵")
             lines.append(f"落後:{group('lose')}")
             lines.append(("table", matchup_table(res)))
-            lines.append("✅領先 ⚖️拉鋸 ❌落後;FG%、FT% 是命中率,TO 越少越好")
+            lines.append(f"✅領先 ⚖️拉鋸 ❌落後;每天只計算先發 {slots} 人的數據(板凳不算);FG%、FT% 是命中率,TO 越少越好")
             lines.append("")
             boost = tuple(k for _, k, _, _, t in res if t == "close")
         elif me is None:
