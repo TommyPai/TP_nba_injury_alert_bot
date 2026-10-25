@@ -25,7 +25,10 @@
 | `WEBHOOK_SECRET` | Secret | 自己編一串英文和數字,例如 `fantasy2027abc`(不要用符號) |
 
 ## 3. 把 Telegram 接到門鈴
-在瀏覽器網址列貼上下面這行(把三個 `<...>` 換成你的值),按 Enter:
+最簡單:在 repo 資料夾執行 `py cloudflare/set_webhook.py --new`(需要本機 config.json 有機器人 token),
+它會自動產生暗號、設定好 Telegram,並把暗號複製到剪貼簿;再到 Cloudflare 把 `WEBHOOK_SECRET` 換成剪貼簿裡的值。
+
+或手動:在瀏覽器網址列貼上下面這行(把三個 `<...>` 換成你的值),按 Enter:
 
     https://api.telegram.org/bot<機器人token>/setWebhook?url=<Worker網址>&secret_token=<WEBHOOK_SECRET>
 
