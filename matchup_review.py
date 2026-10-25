@@ -40,6 +40,28 @@ def gp(p):
     return p.points_breakdown.get("GP", 0) or 0
 
 
+def live(my_l, opp_l):
+    """用球員本週的即時數據加總出九類比分和勝負。
+    ESPN 的隊伍累計比分要等每天結算才更新,球員數據是即時的,所以自己算。"""
+    def tot(lineup):
+        t = {k: sum((p.points_breakdown.get(k) or 0) for p in lineup)
+             for k in ("PTS", "REB", "AST", "STL", "BLK", "3PM", "TO", "FGM", "FGA", "FTM", "FTA")}
+        t["FG%"] = t["FGM"] / t["FGA"] if t["FGA"] else 0
+        t["FT%"] = t["FTM"] / t["FTA"] if t["FTA"] else 0
+        return t
+    a, b = tot(my_l), tot(opp_l)
+    if not (a["PTS"] or b["PTS"]):
+        return None
+    mine, theirs, wlt = {}, {}, [0, 0, 0]
+    for c in CATS:
+        diff = (a[c] - b[c]) * (-1 if c == "TO" else 1)
+        r = "WIN" if diff > 1e-9 else "LOSS" if diff < -1e-9 else "TIE"
+        wlt[["WIN", "LOSS", "TIE"].index(r)] += 1
+        mine[c] = {"value": a[c], "result": r}
+        theirs[c] = {"value": b[c], "result": {"WIN": "LOSS", "LOSS": "WIN"}.get(r, r)}
+    return mine, theirs, wlt
+
+
 def top(lineup, c, n=3):
     key = "FGA" if c == "FG%" else "FTA" if c == "FT%" else c
     ps = [p for p in lineup if (p.points_breakdown.get(key) or 0) > 0]
@@ -65,9 +87,14 @@ def main():
     box = next(b for b in boxes if me.team_id in (getattr(b.home_team, "team_id", b.home_team),
                                                    getattr(b.away_team, "team_id", b.away_team)))
     my_s, my_l, w, l, t, opp, opp_s, opp_l = side(box, me.team_id)
+    now = live(my_l, opp_l)
+    source = "ESPN 結算比分"
+    if now:
+        my_s, opp_s, (w, l, t) = now
+        source = "即時,依球員數據加總"
 
     head = f"🔍 第 {period} 週戰況:{me.team_name} vs {opp.team_name}"
-    blocks = [(f"目前 {w} 勝 {l} 敗 {t} 和" + ("(本週還沒結束)" if not args.last else ""), False)]
+    blocks = [(f"目前 {w} 勝 {l} 敗 {t} 和" + ("(本週還沒結束)" if not args.last else "") + f" · {source}", False)]
 
     rows = ["CAT     YOU    OPP"]
     for c in CATS:
