@@ -99,6 +99,9 @@ def get_json(url, retries=3):
         except (urllib.error.URLError, TimeoutError):
             if attempt == retries - 1:
                 raise
+        except ValueError:  # ESPN 偶爾回傳空白內容,重試後仍然空白就當作沒有資料
+            if attempt == retries - 1:
+                return None
         time.sleep(1.5 * (attempt + 1))
 
 
