@@ -5,7 +5,7 @@
 三段:
   📈 角色上升:今年上場時間比去年多 5 分鐘以上(最早的爆發訊號)
   📅 今天有比賽:當天串流用
-  ⭐ 整體最佳:今年 + 去年混合數據,依 Cade 打法(得分、3PM、罰球、助攻、抄截)排序,去年出賽少的打折
+  ⭐ 整體最佳:今年 + 去年混合數據,依球隊打法(見 blend.WEIGHTS)排序,去年出賽少的打折
 
     python daily_watch.py          推播
     python daily_watch.py --dry    只印出
@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import espn_league
-from blend import blend, cade_per_min, season_stats
+from blend import BUILD_NAME, blend, build_per_min, season_stats
 from nba_injury_alert import get_json, load_config, notify
 
 BASE = Path(__file__).resolve().parent
@@ -95,15 +95,15 @@ def main():
             continue
         # 健康優先:去年出賽少的人打折(打滿 70 場不打折,最多打 7 折)
         health = 0.7 + 0.3 * min(1.0, (prev["gp"] if prev else 40) / 70)
-        value = cade_per_min(b) * b["min"] * health
+        value = build_per_min(b) * b["min"] * health
         rows.append({"name": name, "team": abbr, "cur": cur, "prev": prev, "b": b, "value": value})
     rows.sort(key=lambda r: -r["value"])
 
     def line(r):
         b, prev = r["b"], r["prev"]
         g = f"去年{prev['gp']:.0f}場" if prev else "去年無數據"
-        return (f"{short(r['name'])}({r['team']}) {b['min']:.0f}分鐘 {b['pts']:.1f}分 {b['tpm']:.1f}三 "
-                f"{b['ast']:.1f}助 {b['stl']:.1f}抄 罰{b.get('ftp', 0) * 100:.0f}% | {g}")
+        return (f"{short(r['name'])}({r['team']}) {b['min']:.0f}分鐘 {b['pts']:.1f}分 {b['reb']:.1f}板 "
+                f"{b['ast']:.1f}助 {b['stl']:.1f}抄 {b['blk']:.1f}鍋 命中{b.get('fgp', 0) * 100:.0f}% | {g}")
 
     rising = [r for r in rows if r["cur"] and r["prev"] and r["cur"]["gp"] >= 2
               and r["cur"]["min"] >= RISE_FLOOR and r["cur"]["min"] - r["prev"]["min"] >= RISE_MIN]
@@ -115,8 +115,8 @@ def main():
     if rising:
         for r in rising[:6]:
             lines.append(f"• {r['name']}({r['team']}) {r['prev']['min']:.0f}→{r['cur']['min']:.0f}分鐘,"
-                         f"今年{r['cur']['gp']:.0f}場 {r['cur']['pts']:.1f}分 {r['cur']['tpm']:.1f}三 "
-                         f"{r['cur']['ast']:.1f}助 {r['cur']['stl']:.1f}抄")
+                         f"今年{r['cur']['gp']:.0f}場 {r['cur']['pts']:.1f}分 {r['cur']['reb']:.1f}板 "
+                         f"{r['cur']['ast']:.1f}助 {r['cur']['stl']:.1f}抄 {r['cur']['blk']:.1f}鍋")
     else:
         lines.append("• 目前沒有")
     lines.append("")
@@ -124,7 +124,7 @@ def main():
     for i, r in enumerate(tonight[:5], 1):
         lines.append(f"{i}. {line(r)}")
     lines.append("")
-    lines.append("⭐ 整體最佳(Cade 打法,今年+去年混合,健康優先)")
+    lines.append(f"⭐ 整體最佳({BUILD_NAME},今年+去年混合,健康優先)")
     for i, r in enumerate(rows[:TOP_N], 1):
         lines.append(f"{i}. {line(r)}")
     if not rows:

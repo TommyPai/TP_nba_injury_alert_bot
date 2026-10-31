@@ -27,7 +27,7 @@ import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
-from blend import blended_stats, cade_per_min
+from blend import blended_stats, build_per_min
 from datetime import datetime
 from pathlib import Path
 
@@ -253,7 +253,7 @@ POS_FIT = {("G", "G"): 1.0, ("F", "F"): 1.0, ("C", "C"): 1.0,
 
 
 def suggest_replacements(cache, inj, stats, year, hurt_ids, cfg, taken_ids=frozenset()):
-    """推薦最可能接手傷兵上場時間、而且接手後在 Cade 打法下產出最多的隊友。
+    """推薦最可能接手傷兵上場時間、而且接手後在球隊打法(blend.WEIGHTS)下產出最多的隊友。
 
     - 排除同隊所有在傷病名單上的人(含每日觀察),以及聯盟已被選走的人(有接 ESPN 時)
     - 數據用今年 + 去年混合(blend.py),今年的上場時間會很快反映新角色
@@ -279,7 +279,7 @@ def suggest_replacements(cache, inj, stats, year, hurt_ids, cfg, taken_ids=froze
         if gain < 3:
             continue
         new_min = s["min"] + gain
-        cands.append((cade_per_min(s) * new_min, p, s, new_min))
+        cands.append((build_per_min(s) * new_min, p, s, new_min))
     cands.sort(key=lambda c: -c[0])
     return [(p, s, new_min) for _, p, s, new_min in cands[:cfg["replacements"]]]
 

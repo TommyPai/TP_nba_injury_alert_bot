@@ -62,11 +62,25 @@ def blended_stats(pid, year, get_json):
     return out
 
 
-def cade_per_min(s):
-    """Cade 打法(得分、3PM、罰球、助攻、抄截;不計失誤)的每分鐘價值。"""
+# 球隊打法:主攻命中率、阻攻、籃板、抄截、助攻,得分其次;放棄罰球命中率,失誤不計。
+# 每單位數據的權重;命中率用「比聯盟平均多進幾球」計算,權重 0 代表放棄該類。
+WEIGHTS = {"pts": 1.0, "tpm": 1.5, "ast": 1.5, "stl": 3.0, "reb": 1.0, "blk": 3.0, "fg": 4.0, "ft": 0.0}
+BUILD_NAME = "主攻命中率、阻攻、籃板、抄截、助攻(放棄罰球)"
+
+
+def build_value(s, boost=()):
+    """單場價值。boost 是本週拉鋸中的類別,權重加倍。"""
+    b = lambda k: 2.0 if k in boost else 1.0
+    fg = (s.get("fgp", 0.47) - 0.47) * s.get("fga", 0)
+    ft = (s.get("ftp", 0.78) - 0.78) * s.get("fta", 0)
+    return sum(WEIGHTS[k] * b(k) * v for k, v in (
+        ("pts", s.get("pts", 0)), ("tpm", s.get("tpm", 0)), ("ast", s.get("ast", 0)),
+        ("stl", s.get("stl", 0)), ("reb", s.get("reb", 0)), ("blk", s.get("blk", 0)),
+        ("fg", fg), ("ft", ft)))
+
+
+def build_per_min(s):
+    """每分鐘價值(依 WEIGHTS 的打法)。"""
     if not s or not s.get("min"):
         return 0.0
-    ft = (s.get("ftp", 0.78) - 0.78) * s.get("fta", 0)
-    v = (s.get("pts", 0) + 3.0 * s.get("tpm", 0) + 1.2 * s.get("ast", 0) + 2.5 * s.get("stl", 0)
-         + 0.4 * s.get("reb", 0) + 1.0 * s.get("blk", 0) + 6 * ft)
-    return v / s["min"]
+    return build_value(s) / s["min"]

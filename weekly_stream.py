@@ -2,7 +2,7 @@
 """每週串流推播
 
 列出本週(美東週一到週日)每隊比賽場數，並從比賽最多的球隊裡，
-挑出撿得到、符合 Cade 打法(得分、3PM、罰球、助攻、抄截；不計失誤)的串流人選，推播到 Telegram。
+挑出撿得到、符合球隊打法(見 blend.WEIGHTS)的串流人選，推播到 Telegram。
 
 有接上 ESPN 聯盟(ESPN_S2、ESPN_SWID)時：
 - 只推薦聯盟裡真正的自由球員
@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import espn_league
-from blend import blended_stats, season_stats as _season_stats
+from blend import BUILD_NAME, blended_stats, build_value, season_stats as _season_stats
 from nba_injury_alert import get_json, load_config, notify
 
 BASE = Path(__file__).resolve().parent
@@ -87,15 +87,8 @@ def player_stats(pid, year):
 
 
 def cade_value(s, boost=()):
-    """Cade 打法的單場價值：得分、3PM、罰球、助攻、抄截為主，失誤不計。
-    boost 是本週拉鋸中的類別，權重加倍。"""
-    b = lambda k: 2.0 if k in boost else 1.0
-    ft_impact = (s.get("ftp", 0.78) - 0.78) * s.get("fta", 0)
-    fg_impact = (s.get("fgp", 0.47) - 0.47) * s.get("fga", 0)
-    return (s.get("pts", 0) * 1.0 * b("pts") + s.get("tpm", 0) * 3.0 * b("tpm")
-            + s.get("ast", 0) * 1.2 * b("ast") + s.get("stl", 0) * 2.5 * b("stl")
-            + s.get("reb", 0) * 0.4 * b("reb") + s.get("blk", 0) * 1.0 * b("blk")
-            + ft_impact * 6 * b("ft") + fg_impact * 3 * (b("fg") - 1))
+    """單場價值,權重見 blend.WEIGHTS;boost 是本週拉鋸中的類別,權重加倍。"""
+    return build_value(s, boost)
 
 
 def active_slots(team):
@@ -250,7 +243,7 @@ def main():
     lines.append("")
     who = "你聯盟的自由球員" if lg else "還沒被選走"
     focus = f",拉鋸類別加權" if boost else ""
-    lines.append(f"建議串流（{who}、混合今年與去年後場均 20 分鐘以上，依 Cade 打法 × 本週場數排序{focus}）：")
+    lines.append(f"建議串流（{who}、混合今年與去年後場均 20 分鐘以上，依{BUILD_NAME} × 本週場數排序{focus}）：")
     for i, (_, name, abbr, s) in enumerate(cands[:TOP_N], 1):
         lines.append(f"{i}. {name} ({abbr}，{games[abbr]}場) {s.get('pts', 0):.1f}分 {s.get('tpm', 0):.1f}三 "
                      f"{s.get('ast', 0):.1f}助 {s.get('stl', 0):.1f}抄 {s.get('blk', 0):.1f}帽 "
