@@ -62,21 +62,42 @@ def blended_stats(pid, year, get_json):
     return out
 
 
-# 球隊打法:主攻命中率、阻攻、籃板、抄截、助攻,得分其次;放棄罰球命中率,失誤不計。
-# 每單位數據的權重;命中率用「比聯盟平均多進幾球」計算,權重 0 代表放棄該類。
-WEIGHTS = {"pts": 1.0, "tpm": 1.5, "ast": 1.5, "stl": 3.0, "reb": 1.0, "blk": 3.0, "fg": 4.0, "ft": 0.0}
-BUILD_NAME = "主攻命中率、阻攻、籃板、抄截、助攻(放棄罰球)"
+# 球隊打法:命中率、阻攻、籃板、抄截、助攻、失誤是主力(1),得分、三分其次(0.5),放棄罰球(0)。
+BASE_WEIGHTS = {"fg": 1.0, "blk": 1.0, "reb": 1.0, "stl": 1.0, "ast": 1.0, "tov": 1.0,
+                "pts": 0.5, "tpm": 0.5, "ft": 0.0}
+BUILD_NAME = "主力命中率、阻攻、籃板、抄截、助攻、失誤(放棄罰球)"
+# 單一類別不要太強:我隊最近一週比聯盟平均高 STRONG_SD 個標準差以上 → 權重 × STRONG_FACTOR;
+# 低 HOPELESS_SD 個標準差以上 → 追不上,權重歸 0。由 espn_league.refresh_build() 套用。
+STRONG_SD, STRONG_FACTOR, HOPELESS_SD = 1.5, 0.8, -1.5
+WEIGHTS = dict(BASE_WEIGHTS)
+
+# 聯盟每隊每週(換算成 7 天)的平均與標準差,用來把各類數據換成同一把尺。
+# 預設是第 1–2 週的真實成績;espn_league.refresh_build() 會換成最新的。
+WEEK_MU = {"pts": 643.7, "reb": 230.6, "ast": 147.0, "stl": 44.6, "blk": 26.2, "tpm": 67.1, "tov": 87.2,
+           "fga": 494.1, "fta": 151.9, "fg": 0.4632, "ft": 0.7863}
+WEEK_SD = {"pts": 79.6, "reb": 26.5, "ast": 27.5, "stl": 8.2, "blk": 6.6, "tpm": 15.3, "tov": 16.2,
+           "fg": 0.0232, "ft": 0.0392}
+
+
+def set_build(mu, sd, weights):
+    """換上新的聯盟週平均、標準差與權重(就地更新,已 import 的模組也會看到)。"""
+    WEEK_MU.update(mu)
+    WEEK_SD.update(sd)
+    WEIGHTS.update(weights)
+
+
+def build_z(s):
+    """單場數據能把隊伍週成績推動幾個聯盟標準差(失誤越少越好;命中率看拉高或拉低整週命中率多少)。"""
+    z = {k: s.get(k, 0) / WEEK_SD[k] for k in ("pts", "reb", "ast", "stl", "blk", "tpm")}
+    z["tov"] = -s.get("tov", 0) / WEEK_SD["tov"]
+    for k, made, att in (("fg", "fgp", "fga"), ("ft", "ftp", "fta")):
+        z[k] = (s.get(made, WEEK_MU[k]) - WEEK_MU[k]) * s.get(att, 0) / WEEK_MU[att] / WEEK_SD[k]
+    return z
 
 
 def build_value(s, boost=()):
-    """單場價值。boost 是本週拉鋸中的類別,權重加倍。"""
-    b = lambda k: 2.0 if k in boost else 1.0
-    fg = (s.get("fgp", 0.47) - 0.47) * s.get("fga", 0)
-    ft = (s.get("ftp", 0.78) - 0.78) * s.get("fta", 0)
-    return sum(WEIGHTS[k] * b(k) * v for k, v in (
-        ("pts", s.get("pts", 0)), ("tpm", s.get("tpm", 0)), ("ast", s.get("ast", 0)),
-        ("stl", s.get("stl", 0)), ("reb", s.get("reb", 0)), ("blk", s.get("blk", 0)),
-        ("fg", fg), ("ft", ft)))
+    """單場價值 = Σ 打法權重 × 推動幾個標準差。boost 是本週拉鋸中的類別,權重加倍。"""
+    return sum(WEIGHTS[k] * (2.0 if k in boost else 1.0) * v for k, v in build_z(s).items())
 
 
 def build_per_min(s):

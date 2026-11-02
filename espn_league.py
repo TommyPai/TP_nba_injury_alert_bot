@@ -81,11 +81,53 @@ def opponent(lg, me, period=None):
     return None
 
 
+WEEK_CATS = {"PTS": "pts", "REB": "reb", "AST": "ast", "STL": "stl", "BLK": "blk", "3PM": "tpm", "TO": "tov",
+             "FGA": "fga", "FTA": "fta", "FG%": "fg", "FT%": "ft"}
+
+
+def refresh_build(lg):
+    """用聯盟已打完各週的真實成績,更新 blend 的週平均、標準差,並依我隊最近一週的強弱調整權重。
+    回傳 {類別: (我隊離平均幾個標準差, 權重)};讀不到就保留預設並回傳 {}。"""
+    import statistics as stt
+    import blend
+    try:
+        rows, mine = [], None
+        me = my_team(lg)
+        for mp in range(1, lg.currentMatchupPeriod):
+            scale = 7 / len(lg.matchup_ids[mp])  # 每週天數不同(開季週較短),累計類別換算成 7 天
+            for b in lg.box_scores(matchup_period=mp):
+                for team, st in ((b.home_team, b.home_stats), (b.away_team, b.away_stats)):
+                    row = {v: st[k]["value"] * (1 if "%" in k else scale) for k, v in WEEK_CATS.items()}
+                    rows.append(row)
+                    if me and getattr(team, "team_id", team) == me.team_id:
+                        mine = row  # 越後面的週會覆蓋前面,留下最近一週
+        if len(rows) < 4:
+            return {}
+        mu = {k: stt.mean(r[k] for r in rows) for k in rows[0]}
+        sd = {k: stt.pstdev(r[k] for r in rows) for k in rows[0] if k not in ("fga", "fta")}
+        weights, report = dict(blend.BASE_WEIGHTS), {}
+        for k in weights:
+            if not mine or not sd[k]:
+                continue
+            z = (mine[k] - mu[k]) / sd[k] * (-1 if k == "tov" else 1)
+            if weights[k] and z >= blend.STRONG_SD:
+                weights[k] *= blend.STRONG_FACTOR
+            elif z <= blend.HOPELESS_SD:
+                weights[k] = 0.0
+            report[k] = (z, weights[k])
+        blend.set_build(mu, sd, weights)
+        return report
+    except Exception as e:  # ESPN 格式變了或暫時讀不到時,沿用預設值
+        print(f"讀不到聯盟週成績,沿用預設權重:{e}", flush=True)
+        return {}
+
+
 def league_sets():
-    """(已被選走的球員 ID, 我的球員 ID);連不上就回傳兩個空集合。"""
+    """(已被選走的球員 ID, 我的球員 ID);連不上就回傳兩個空集合。順便用聯盟週成績更新打法權重。"""
     lg = connect()
     if not lg:
         return frozenset(), frozenset()
+    refresh_build(lg)
     me = my_team(lg)
     mine = {str(p.playerId) for p in me.roster} if me else set()
     return frozenset(rostered_ids(lg)), frozenset(mine)

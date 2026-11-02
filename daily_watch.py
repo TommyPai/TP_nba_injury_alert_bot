@@ -72,6 +72,7 @@ def main():
     # 自由球員判斷
     lg = espn_league.connect()
     if lg:
+        espn_league.refresh_build(lg)
         taken = espn_league.rostered_ids(lg)
         is_free = lambda pid, name: pid not in taken
     else:

@@ -195,6 +195,7 @@ def main():
     me = espn_league.my_team(lg) if lg else None
     lines, boost = [], ()
     if lg:
+        build = espn_league.refresh_build(lg)
         taken = espn_league.rostered_ids(lg)
         is_free = lambda pid, name: pid not in taken
         # 往後看下一週時(例如週日執行),對手也要抓下一週的
@@ -215,6 +216,10 @@ def main():
             boost = tuple(k for _, k, _, _, t in res if t == "close")
         elif me is None:
             lines.append(f"(找不到你的球隊「{espn_league.TEAM_NAME}」,只列自由球員)")
+        if build:
+            lines.append("📐 打法權重(括號是你上週離聯盟平均幾個標準差;超過 +1.5 降為 0.8 倍,低於 −1.5 歸 0):")
+            lines.append(" ".join(f"{ABBR[k]} {wt:g}({z:+.1f})" for k, (z, wt) in build.items()))
+            lines.append("")
     else:
         drafted_path = BASE / "drafted.txt"
         drafted = set()
