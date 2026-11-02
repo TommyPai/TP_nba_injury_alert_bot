@@ -91,16 +91,47 @@ def cade_value(s, boost=()):
     return build_value(s, boost)
 
 
-def active_slots(team):
-    """每天的先發位置數:陣容裡目前不在板凳(BE)和傷兵(IR)位的人數,判斷不出來就用 10。"""
-    n = sum(1 for p in team.roster if p.lineupSlot not in ("BE", "IR", ""))
-    return n if 5 <= n <= 15 else 10
+# 聯盟每天的先發位置(讀不到 ESPN 設定時用這組)
+LINEUP = ["PG", "SG", "SF", "PF", "C", "G", "F", "UT", "UT", "UT"]
+
+
+def lineup_slots(lg):
+    """聯盟每天的先發位置清單,例如 ["PG", …, "UT", "UT", "UT"];讀不到就用 LINEUP。"""
+    try:
+        from espn_api.basketball.constant import POSITION_MAP
+        counts = lg.espn_request.league_get(params={"view": "mSettings"})["settings"]["rosterSettings"]["lineupSlotCounts"]
+        out = [POSITION_MAP[int(k)] for k, n in counts.items() for _ in range(n)
+               if POSITION_MAP.get(int(k)) not in (None, "BE", "IR")]
+        return out if 5 <= len(out) <= 15 else LINEUP
+    except Exception:
+        return LINEUP
+
+
+def pick_starters(cands, slots):
+    """cands 是 (價值, 可打的位置, 項目)。依價值由高到低,排得進合法位置的人才先發;
+    用二分配對檢查位置(先排進去的人只會換位置、不會被擠掉),在這種位置限制下貪婪法就是最佳解。"""
+    owner = [None] * len(slots)  # 每個先發位置目前排了 cands 裡的第幾人
+
+    def place(i, seen):
+        for j, slot in enumerate(slots):
+            if slot in cands[i][1] and j not in seen:
+                seen.add(j)
+                if owner[j] is None or place(owner[j], seen):
+                    owner[j] = i
+                    return True
+        return False
+
+    for i in sorted(range(len(cands)), key=lambda i: -cands[i][0]):
+        place(i, set())
+    return [cands[i][2] for i in owner if i is not None]
 
 
 def project(players, day_teams, pid_team, year, slots):
     """一隊本週的預估九類總量。
-    逐日計算:當天有比賽的人裡,只有價值最高的 slots 個能排進先發、數據才算數(板凳不算);
-    IR 和確定缺陣的不算。"""
+    逐日計算:當天有比賽的人裡,依價值排進合法的先發位置,只有先發的數據才算數(板凳不算);
+    IR 和確定缺陣的不算。slots 是位置清單(lineup_slots);傳數字時 10 代表 LINEUP,其他數字代表不分位置。"""
+    if isinstance(slots, int):
+        slots = LINEUP if slots == len(LINEUP) else ["UT"] * slots
     tot = dict.fromkeys(["pts", "reb", "ast", "stl", "blk", "tpm", "tov", "fga", "fgm", "fta", "ftm"], 0.0)
     pool = []
     for p in players:
@@ -109,10 +140,11 @@ def project(players, day_teams, pid_team, year, slots):
         team = pid_team.get(str(p.playerId))
         s = player_stats(p.playerId, year) if team else None
         if s:
-            pool.append((team, s, cade_value(s)))
+            elig = set(getattr(p, "eligibleSlots", None) or slots)  # 不知道位置的人當作哪裡都能打
+            pool.append((team, s, cade_value(s), elig))
     for today in day_teams:
-        starters = sorted((x for x in pool if x[0] in today), key=lambda x: -x[2])[:slots]
-        for _, s, _ in starters:
+        starters = pick_starters([(v, elig, s) for team, s, v, elig in pool if team in today], slots)
+        for s in starters:
             for k in ("pts", "reb", "ast", "stl", "blk", "tpm", "tov"):
                 tot[k] += s.get(k, 0)
             tot["fga"] += s.get("fga", 0)
@@ -201,7 +233,7 @@ def main():
         # 往後看下一週時(例如週日執行),對手也要抓下一週的
         opp = espn_league.opponent(lg, me, lg.currentMatchupPeriod + weeks_ahead) if me else None
         if me and opp:
-            slots = active_slots(me)
+            slots = lineup_slots(lg)
             mine_p = project(me.roster, day_teams, pid_team, year, slots)
             opp_p = project(opp.roster, day_teams, pid_team, year, slots)
             res = compare(mine_p, opp_p)
@@ -211,7 +243,7 @@ def main():
             lines.append(f"拉鋸:{group('close')}  ← 這週的勝負關鍵")
             lines.append(f"落後:{group('lose')}")
             lines.append(("table", matchup_table(res)))
-            lines.append(f"✅領先 ⚖️拉鋸 ❌落後;每天只計算先發 {slots} 人的數據(板凳不算);FG%、FT% 是命中率,TO 越少越好")
+            lines.append(f"✅領先 ⚖️拉鋸 ❌落後;每天依位置排出先發 {len(slots)} 人,只計算先發的數據(板凳不算);FG%、FT% 是命中率,TO 越少越好")
             lines.append("")
             boost = tuple(k for _, k, _, _, t in res if t == "close")
         elif me is None:
