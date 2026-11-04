@@ -1,0 +1,41 @@
+name: Fantasy snapshot
+
+on:
+  schedule:
+    - cron: "30 20 * * *"   # 每天 20:30 UTC = 墨爾本早上 7:30(夏令時間)
+  workflow_dispatch:
+
+permissions:
+  contents: write            # 用來把 fantasy-snapshot.md 存回 repo
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ESPN_S2: ${{ secrets.ESPN_S2 }}
+      ESPN_SWID: ${{ secrets.ESPN_SWID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install espn_api
+        run: python3 -m pip install --quiet espn_api || python3 -m pip install --quiet --break-system-packages espn_api
+
+      - name: Build snapshot
+        run: python3 snapshot.py
+
+      - name: Save snapshot
+        run: |
+          # 傷兵機器人每 5 分鐘也會推 state.json:先保存結果,對齊遠端最新版後放回去,推送失敗就重試
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          tmp=$(mktemp) && cp fantasy-snapshot.md "$tmp"
+          for i in 1 2 3; do
+            git fetch -q origin "$GITHUB_REF_NAME"
+            git reset -q --hard "origin/$GITHUB_REF_NAME"
+            cp "$tmp" fantasy-snapshot.md
+            git add fantasy-snapshot.md
+            if git diff --cached --quiet; then echo "no changes"; exit 0; fi
+            git commit -q -m "update fantasy snapshot" && git push -q origin "HEAD:$GITHUB_REF_NAME" && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
