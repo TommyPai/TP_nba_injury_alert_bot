@@ -48,6 +48,11 @@ jobs:
         continue-on-error: true   # 指令報告失敗也要保存狀態,避免重複執行
         run: python3 bot_commands.py
 
+      - name: Injury fix offers
+        if: ${{ !inputs.test }}
+        continue-on-error: true
+        run: python3 auto_fix.py --scan
+
       - name: Save state
         if: ${{ !inputs.test }}
         run: |

@@ -22,10 +22,12 @@ export default {
       return new Response("ok");
     }
     const cmd = msg.text.trim().split(/\s+/)[0].split("@")[0].replace(/^\//, "").toLowerCase();
-    if (!COMMANDS.includes(cmd)) return new Response("ok");
+    // /fix_球員ID_球員ID:傷兵通知裡點一下,移到 IR 並撿人(fix.yml 動手前會再檢查一次)
+    const fix = cmd.match(/^fix_(\d+)_(\d+)$/);
+    if (!fix && !COMMANDS.includes(cmd)) return new Response("ok");
 
     const r = await fetch(
-      `https://api.github.com/repos/${env.GITHUB_REPO}/actions/workflows/command.yml/dispatches`,
+      `https://api.github.com/repos/${env.GITHUB_REPO}/actions/workflows/${fix ? "fix" : "command"}.yml/dispatches`,
       {
         method: "POST",
         headers: {
@@ -34,7 +36,7 @@ export default {
           "X-GitHub-Api-Version": "2022-11-28",
           "User-Agent": "tg-fantasy-bot",
         },
-        body: JSON.stringify({ ref: "main", inputs: { cmd } }),
+        body: JSON.stringify({ ref: "main", inputs: fix ? { out: fix[1], add: fix[2] } : { cmd } }),
       },
     );
     const text = r.ok
