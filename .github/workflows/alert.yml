@@ -53,6 +53,11 @@ jobs:
         continue-on-error: true
         run: python3 auto_fix.py --scan
 
+      - name: Drop Ellis after Sunday game
+        if: ${{ !inputs.test }}
+        continue-on-error: true
+        run: python3 ellis_drop.py
+
       - name: Save state
         if: ${{ !inputs.test }}
         run: |
