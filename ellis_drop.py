@@ -2,16 +2,18 @@
 """一次性(Tommy 11/8 指示):Keon Ellis 打完美國週日 11/8 BKN vs DAL 就放掉,不撿人。
 放掉之後,Allen 一旦不是 OUT 就從 IR 移回來;如果當天第一場還沒開打,順便把當天有比賽的人排進先發。
 每一步只做一次(記在 state.json),到 11/16 自動停止。"""
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import auto_fix as a
 import espn_league
+import preset
 import weekly_stream as w
 from nba_injury_alert import STATE_PATH, get_json, load_config, load_json, notify, save_json
 
 ELLIS_GAME_DAY = "20261108"
 ALLEN = 4066328
 END = datetime(2026, 11, 16, 8, 0, tzinfo=timezone.utc)
+WEEK_END = date(2026, 11, 15)  # 美國週日
 ACTIVE_MAX = 13  # 先發 10 + 板凳 3
 
 
@@ -63,11 +65,14 @@ def main():
                          "items": [{"playerId": ALLEN, "type": "LINEUP", "fromLineupSlotId": a.IR, "toLineupSlotId": a.BE}]})
     if code >= 300:
         return done("allen_back_done", "⚠️ Allen 沒移出 IR", f"ESPN 回應 {code}:{text}\n請手動處理。")
-    if started:
-        return done("allen_back_done", "✅ Allen 已移出 IR",
-                    f"Allen 現在是 {allen['status']}。今天第一場已開打,明天才生效,明天的先發要再排。")
-    code, text = a.set_lineup(espn_league.connect(), team_id, opp, today, tids)
-    msg = "今天有比賽的人已排進先發。" if code < 300 else f"但排先發失敗({code}),請手動排。"
+    # 之後每天的陣容已經先排好(沒有 Allen),所以從今天(已開打就從明天)到週日全部重排一次
+    us_today = (datetime.now(timezone.utc) - timedelta(hours=a.ROLLOVER)).date()
+    first = us_today + timedelta(days=1 if started else 0)
+    days = [first + timedelta(i) for i in range((WEEK_END - first).days + 1)]
+    bad = [f"{d:%m/%d}({c})" for d, _, c, *_ in preset.preset(days)] if days else []
+    bad = [x for x in bad if not x.endswith("(200)")]
+    when = "明天" if started else "今天"
+    msg = f"{when}到週日有比賽的人已排進先發。" if not bad else f"但這幾天排先發失敗:{'、'.join(bad)},請手動排。"
     done("allen_back_done", "✅ Allen 已移出 IR", f"Allen 現在是 {allen['status']}。{msg}")
 
 
