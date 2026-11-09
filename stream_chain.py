@@ -22,7 +22,9 @@ NEVER = {"Jarrett Allen", "Moussa Diabate"}
 OPP_NAME = "bbq chicken"
 WEEK = (date(2026, 11, 9), date(2026, 11, 15))
 PROPOSE_ONLY = True                 # True:只用 Telegram 推薦,不換人(Tommy 要每天自己選)
-PLAN = {"2026-11-09": "Jaylen Wells", "2026-11-10": "Pelle Larsson"}  # Tommy 選好的:美國日期 → 要撿的人(放掉目前串流位的人)
+PLAN = {"2026-11-09": "Jaylen Wells", "2026-11-10": "Precious Achiuwa"}  # Tommy 選好的:美國日期 → 要撿的人(名單有空位就不放人,否則放掉目前串流位的人)
+ACTIVE_MAX = 13                     # 先發 10 + 板凳 3
+RETURN = ("Moussa Diabate", "Jaylen Wells")  # Tommy 11/10:Diabate 從 IR 回來那天(他有比賽、不是 OUT),放 Wells 讓位
 WINDOW = timedelta(minutes=120)     # 第一場開打前多久開始動作(越晚傷況越清楚,但 GitHub 排程會延遲)
 K = ("pts", "reb", "ast", "stl", "blk", "tpm", "tov", "fga", "fgm", "fta", "ftm")
 MAP = dict(zip(K, ("PTS", "REB", "AST", "STL", "BLK", "3PM", "TO", "FGA", "FGM", "FTA", "FTM")))
@@ -89,6 +91,51 @@ def matchup(name, team, opp, team_ids):
             f"{s.get('blk', 0):.1f}帽 {s.get('reb', 0):.1f}板)")
 
 
+def ir_back(us_today, now, state, args):
+    """RETURN[0] 在 IR、今天有比賽、不是 OUT:第一場開打前放掉 RETURN[1](名單滿才放),把他移回板凳,再重排陣容。只做一次。"""
+    name, drop = RETURN
+    if state.get("ir_back_done"):
+        return
+    events = (get_json(w.SCOREBOARD.format(d=us_today.strftime("%Y%m%d"))) or {}).get("events", [])
+    if not events:
+        return
+    tip = min(datetime.fromisoformat(ev["date"].replace("Z", "+00:00")) for ev in events)
+    if not args.force and not (tip - WINDOW <= now < tip):
+        return
+    playing = {str(c["team"]["id"]) for ev in events for c in ev["competitions"][0]["competitors"]}
+    sp, team_id, entries = preset.roster_at()
+    pl = lambda x: x["playerPoolEntry"]["player"]
+    p = next((x for x in entries if pl(x)["fullName"] == name), None)
+    if not p or p["lineupSlotId"] != a.IR or pl(p).get("injuryStatus") == "OUT" or str(pl(p)["proTeamId"]) not in playing:
+        return
+    d = next((x for x in entries if pl(x)["fullName"] == drop), None)
+    full = sum(x["lineupSlotId"] != a.IR for x in entries) >= ACTIVE_MAX
+    print(us_today, f"{name} 回來", f"放 {drop}" if full else "不用放人", flush=True)
+    if args.dry:
+        return
+    cfg = load_config()
+    state["ir_back_done"] = True
+    save_json(STATE_PATH, state)
+    if full:
+        if not d:
+            return notify(cfg, f"⚠️ {name} 沒移出 IR", f"名單滿了,但找不到要放的 {drop}。請手動處理。", "IR 沒動")
+        code, text = a.post({"teamId": team_id, "type": "ROSTER", "scoringPeriodId": sp,
+                             "items": [{"playerId": d["playerId"], "type": "DROP", "fromTeamId": team_id}]})
+        if code >= 300:
+            return notify(cfg, f"⚠️ {drop} 沒放成", f"ESPN 回應 {code}:{text}\n{name} 還在 IR,請手動處理。", "IR 沒動")
+    code, text = a.post({"teamId": team_id, "type": "ROSTER", "scoringPeriodId": sp, "items": [
+        {"playerId": p["playerId"], "type": "LINEUP", "fromLineupSlotId": a.IR, "toLineupSlotId": a.BE}]})
+    if code >= 300:
+        return notify(cfg, f"⚠️ {name} 沒移出 IR", f"ESPN 回應 {code}:{text}\n請手動處理。", "IR 沒動")
+    _, _, after = preset.roster_at()
+    ok = any(pl(x)["fullName"] == name and x["lineupSlotId"] != a.IR for x in after)
+    days_left = [us_today + timedelta(j) for j in range((WEEK[1] - us_today).days + 1)]
+    bad = [f"{x:%m/%d}({c})" for x, _, c, *_ in preset.preset(days_left) if c >= 300]
+    body = ((f"已放 {drop}," if full else "") + (f"{name} 已移回名單" if ok else f"⚠️ ESPN 名單上 {name} 還在 IR")
+            + (f"。排先發失敗:{'、'.join(bad)},請手動排。" if bad else "。今天到週日陣容已重排。"))
+    notify(cfg, f"🔄 {name} 回來", body, body[:120])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry", action="store_true")
@@ -100,6 +147,7 @@ def main():
     if not WEEK[0] <= us_today <= WEEK[1]:
         return
     state = load_json(STATE_PATH, {})
+    ir_back(us_today, now, state, args)
     sc = state.setdefault("stream_chain", {})
     key = us_today.isoformat()
     if sc.get(key) and not args.dry:
@@ -119,6 +167,8 @@ def main():
     slot_name = sc.get("current") or FIRST_SLOT
     cur = next((p for p in me.roster if p.name == slot_name), None)
     if not cur or cur.name in NEVER:
+        if args.dry:
+            return print("找不到串流位", slot_name, flush=True)
         sc[key] = "error"
         save_json(STATE_PATH, state)
         return notify(load_config(), "⚠️ 串流沒換", f"名單上找不到串流位的 {slot_name},為了安全不動任何人。", "串流沒換")
@@ -216,19 +266,24 @@ def main():
         sc[key] = "no_adds"
         save_json(STATE_PATH, state)
         return notify(cfg, "⚠️ 串流沒換", "這週撿人額度用完了。", "串流沒換")
-    code, text = a.post({"teamId": team_id, "type": "FREEAGENT", "scoringPeriodId": lg.scoringPeriodId,
-                         "items": [{"playerId": p.playerId, "type": "ADD", "toTeamId": team_id},
-                                   {"playerId": cur.playerId, "type": "DROP", "fromTeamId": team_id}]})
+    room = sum(x.lineupSlot != "IR" for x in me.roster) < ACTIVE_MAX  # 有空位就只撿不放
+    items = [{"playerId": p.playerId, "type": "ADD", "toTeamId": team_id}]
+    if not room:
+        items.append({"playerId": cur.playerId, "type": "DROP", "fromTeamId": team_id})
+    code, text = a.post({"teamId": team_id, "type": "FREEAGENT", "scoringPeriodId": lg.scoringPeriodId, "items": items})
     if code >= 300:
         sc[key] = "error"
         save_json(STATE_PATH, state)
         return notify(cfg, "⚠️ 串流沒換", f"ESPN 回應 {code}:{text}\n沒有重試,{cur.name} 還在。", "串流沒換")
     sc[key], sc["current"] = p.name, p.name
     save_json(STATE_PATH, state)
+    _, ros = a.my_entries()  # 確認 ESPN 名單真的有他(開打後才撿會隔天生效)
+    if not any(x["id"] == p.playerId for x in ros):
+        notify(cfg, f"⚠️ {p.name} 還不在名單", f"ESPN 回 {code},但名單上還沒有 {p.name},請到 ESPN 確認。", "撿人未確認")
     days_left = [us_today + timedelta(j) for j in range((WEEK[1] - us_today).days + 1)]
     bad = [f"{d:%m/%d}({c})" for d, _, c, *_ in preset.preset(days_left) if c >= 300]
     s = season_stats(p.playerId, e.YEAR, get_json)
-    body = (f"放 {cur.name}、撿 {p.name}(今天對 {opp_of[i0][pid_team.get(str(p.playerId))]})。"
+    body = (("名單有空位,沒放人;" if room else f"放 {cur.name}、") + f"撿 {p.name}(今天對 {opp_of[i0][pid_team.get(str(p.playerId))]})。"
             f"本季 {s['pts']:.1f}分 {s['reb']:.1f}板 {s['ast']:.1f}助 {s['stl']:.1f}抄 {s['tov']:.1f}失誤。{line}"
             + (f"\n排先發失敗:{'、'.join(bad)},請手動排。" if bad else "\n今天到週日陣容已重排。"))
     notify(cfg, f"🔄 串流:{p.name}", body, body[:120])
