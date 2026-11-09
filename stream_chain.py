@@ -21,6 +21,7 @@ FIRST_SLOT = "Brook Lopez"          # 串流位一開始的人
 NEVER = {"Jarrett Allen", "Moussa Diabate"}
 OPP_NAME = "bbq chicken"
 WEEK = (date(2026, 11, 9), date(2026, 11, 15))
+PROPOSE_ONLY = True                 # True:只用 Telegram 推薦,不換人(Tommy 要每天自己選)
 WINDOW = timedelta(minutes=120)     # 第一場開打前多久開始動作(越晚傷況越清楚,但 GitHub 排程會延遲)
 K = ("pts", "reb", "ast", "stl", "blk", "tpm", "tov", "fga", "fgm", "fta", "ftm")
 MAP = dict(zip(K, ("PTS", "REB", "AST", "STL", "BLK", "3PM", "TO", "FGA", "FGM", "FTA", "FTM")))
@@ -131,6 +132,21 @@ def main():
             continue
         options.append((score(add(base, game(s, opp_of[i0][tm], f_off, f_stl)), opp_tot), p, "add"))
     options.sort(key=lambda r: r[0], reverse=True)
+    if PROPOSE_ONLY and not args.dry:  # Tommy 11/9:每天的人要他自己決定,只推薦前三名,不送出
+        top = [r for r in options if r[2] == "keep" or a.player_status(lg, r[1].playerId) == "FREEAGENT"][:4]
+        lines = [f"今天串流位是 {cur.name}。候選(預估本週 贏−輸 類別數,拉鋸推進):"]
+        for (net, push), p, kind in top:
+            if kind == "keep":
+                lines.append(f"・留 {cur.name}:{net:+d} 類({push:.2f})")
+                continue
+            s = season_stats(p.playerId, e.YEAR, get_json)
+            tm = pid_team.get(str(p.playerId))
+            lines.append(f"・{p.name}({tm} 對 {opp_of[i0][tm]}):{net:+d} 類({push:.2f})"
+                         f" {s['pts']:.1f}分 {s['reb']:.1f}板 {s['ast']:.1f}助 {s['stl']:.1f}抄 {s['blk']:.1f}帽 {s['tov']:.1f}失誤")
+        lines.append("要換誰告訴 Claude。")
+        sc[key] = "proposed"
+        save_json(STATE_PATH, state)
+        return notify(load_config(), "📋 今天的串流候選", "\n".join(lines), "串流候選")
     pick = None
     for sc_, p, kind in options:
         if kind == "keep" or a.player_status(lg, p.playerId) == "FREEAGENT":
