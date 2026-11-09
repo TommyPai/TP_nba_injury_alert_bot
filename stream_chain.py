@@ -22,6 +22,7 @@ NEVER = {"Jarrett Allen", "Moussa Diabate"}
 OPP_NAME = "bbq chicken"
 WEEK = (date(2026, 11, 9), date(2026, 11, 15))
 PROPOSE_ONLY = True                 # True:只用 Telegram 推薦,不換人(Tommy 要每天自己選)
+PLAN = {"2026-11-09": "Jaylen Wells"}  # Tommy 選好的:美國日期 → 要撿的人(放掉目前串流位的人)
 WINDOW = timedelta(minutes=120)     # 第一場開打前多久開始動作(越晚傷況越清楚,但 GitHub 排程會延遲)
 K = ("pts", "reb", "ast", "stl", "blk", "tpm", "tov", "fga", "fgm", "fta", "ftm")
 MAP = dict(zip(K, ("PTS", "REB", "AST", "STL", "BLK", "3PM", "TO", "FGA", "FGM", "FTA", "FTM")))
@@ -165,7 +166,16 @@ def main():
             continue
         options.append((score(add(base, game(s, opp_of[i0][tm], f_off, f_stl)), opp_tot), p, "add"))
     options.sort(key=lambda r: r[0], reverse=True)
-    if PROPOSE_ONLY and not args.dry:  # Tommy 11/9:每天的人要他自己決定,只推薦前三名,不送出
+    want = PLAN.get(key)
+    if want:  # Tommy 已經選好今天的人
+        chosen = next((r for r in options if r[1].name == want and r[2] == "add"), None)
+        if not chosen or a.player_status(lg, chosen[1].playerId) != "FREEAGENT":
+            sc[key] = "error"
+            save_json(STATE_PATH, state)
+            return notify(load_config(), "⚠️ 串流沒換",
+                          f"{want} 今天不能撿(不是健康的自由球員或今天沒比賽),{cur.name} 還在。請告訴 Claude 換誰。", "串流沒換")
+        options = [chosen]
+    elif PROPOSE_ONLY and not args.dry:  # Tommy 11/9:每天的人要他自己決定,只推薦前三名,不送出
         top = [r for r in options if r[2] == "keep" or a.player_status(lg, r[1].playerId) == "FREEAGENT"][:4]
         dr, rk = team_drtg(team_ids)
         lg_avg = sum(dr.values()) / len(dr) if dr else 0
