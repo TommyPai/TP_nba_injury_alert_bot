@@ -156,7 +156,8 @@ def main():
     if not events:
         return
     tip = min(datetime.fromisoformat(ev["date"].replace("Z", "+00:00")) for ev in events)
-    if not args.force and not (tip - WINDOW <= now < tip):
+    early = bool(PLAN.get(key)) and now < tip  # Tommy 11/10:已選好的人,ESPN 一換日(墨爾本約 19:00)就撿,免得被搶
+    if not args.force and not (early or tip - WINDOW <= now < tip):
         return
     lg = e.connect()
     if not args.force and lg.scoringPeriodId != preset.BASE_SP + (us_today - preset.BASE_DAY).days:
