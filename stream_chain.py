@@ -55,6 +55,39 @@ def game(s, oppo, f_off, f_stl):
     return g
 
 
+CORE_TEAM = "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/{y}/types/2/teams/{id}/statistics"
+DEPTH = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/{id}/depthcharts"
+
+
+def team_drtg(team_ids):
+    """球隊防守效率 = 場均失分 ÷ 場均估計回合 × 100(ESPN standings + core 球隊數據);回傳 ({隊: DRtg}, {隊: 排名,1=最差})。"""
+    st = get_json(a.STANDINGS) or {}
+    pa = {x["team"]["abbreviation"]: {s["name"]: s.get("value") for s in x["stats"]}["avgPointsAgainst"]
+          for c in st.get("children", []) for x in c["standings"]["entries"]}
+    out = {}
+    for ab, tid in team_ids.items():
+        for c in ((get_json(CORE_TEAM.format(y=e.YEAR, id=tid)) or {}).get("splits") or {}).get("categories", []):
+            for s in c["stats"]:
+                if s["name"] == "avgEstimatedPossessions" and s.get("value") and ab in pa:
+                    out[ab] = pa[ab] / s["value"] * 100
+    order = sorted(out, key=lambda k: -out[k])
+    return out, {k: i + 1 for i, k in enumerate(order)}
+
+
+def matchup(name, team, opp, team_ids):
+    """ESPN depth chart:找出這位球員的位置,回傳對手同位置第一個沒受傷的人和他的防守數據。"""
+    pos = lambda ab: ((get_json(DEPTH.format(id=team_ids[ab])) or {}).get("depthchart") or [{}])[0].get("positions", {})
+    mine = next((k for k, v in pos(team).items() if any(x["displayName"] == name for x in v["athletes"])), None)
+    if not mine:
+        return "對位不明"
+    d = next((x for x in pos(opp).get(mine, {}).get("athletes", []) if not x.get("injuries")), None)
+    if not d:
+        return f"{mine.upper()} 對位不明"
+    s = season_stats(int(d["id"]), e.YEAR, get_json) or {}
+    return (f"{mine.upper()} 對位 {d['displayName']}({s.get('min', 0):.0f}分鐘 {s.get('stl', 0):.1f}抄 "
+            f"{s.get('blk', 0):.1f}帽 {s.get('reb', 0):.1f}板)")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry", action="store_true")
@@ -134,15 +167,20 @@ def main():
     options.sort(key=lambda r: r[0], reverse=True)
     if PROPOSE_ONLY and not args.dry:  # Tommy 11/9:每天的人要他自己決定,只推薦前三名,不送出
         top = [r for r in options if r[2] == "keep" or a.player_status(lg, r[1].playerId) == "FREEAGENT"][:4]
-        lines = [f"今天串流位是 {cur.name}。候選(預估本週 贏−輸 類別數,拉鋸推進):"]
+        dr, rk = team_drtg(team_ids)
+        lg_avg = sum(dr.values()) / len(dr) if dr else 0
+        lines = [f"今天串流位是 {cur.name}。候選(預估本週 贏−輸 類別數,拉鋸推進;"
+                 f"對手防守效率=每100回合失分,聯盟平均 {lg_avg:.1f},排名1=最差):"]
         for (net, push), p, kind in top:
             if kind == "keep":
                 lines.append(f"・留 {cur.name}:{net:+d} 類({push:.2f})")
                 continue
             s = season_stats(p.playerId, e.YEAR, get_json)
             tm = pid_team.get(str(p.playerId))
-            lines.append(f"・{p.name}({tm} 對 {opp_of[i0][tm]}):{net:+d} 類({push:.2f})"
+            o = opp_of[i0][tm]
+            lines.append(f"・{p.name}({tm} 對 {o}):{net:+d} 類({push:.2f})"
                          f" {s['pts']:.1f}分 {s['reb']:.1f}板 {s['ast']:.1f}助 {s['stl']:.1f}抄 {s['blk']:.1f}帽 {s['tov']:.1f}失誤")
+            lines.append(f"   {o} 防守效率 {dr.get(o, 0):.1f}(第 {rk.get(o, '?')} 差);{matchup(p.name, tm, o, team_ids)}")
         lines.append("要換誰告訴 Claude。")
         sc[key] = "proposed"
         save_json(STATE_PATH, state)
