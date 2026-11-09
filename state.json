@@ -108,5 +108,9 @@
   "fix_offers": {
     "4395628": "2026-11-09T21:50:27.264174+00:00"
   },
-  "ellis_drop_done": true
+  "ellis_drop_done": true,
+  "stream_chain": {
+    "2026-11-09": "Jaylen Wells",
+    "current": "Jaylen Wells"
+  }
 }
