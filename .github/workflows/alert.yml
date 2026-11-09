@@ -58,6 +58,11 @@ jobs:
         continue-on-error: true
         run: python3 ellis_drop.py
 
+      - name: Daily streaming slot
+        if: ${{ !inputs.test }}
+        continue-on-error: true
+        run: python3 stream_chain.py
+
       - name: Save state
         if: ${{ !inputs.test }}
         run: |
