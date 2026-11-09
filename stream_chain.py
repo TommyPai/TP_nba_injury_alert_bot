@@ -22,7 +22,7 @@ NEVER = {"Jarrett Allen", "Moussa Diabate"}
 OPP_NAME = "bbq chicken"
 WEEK = (date(2026, 11, 9), date(2026, 11, 15))
 PROPOSE_ONLY = True                 # True:只用 Telegram 推薦,不換人(Tommy 要每天自己選)
-PLAN = {"2026-11-09": "Jaylen Wells"}  # Tommy 選好的:美國日期 → 要撿的人(放掉目前串流位的人)
+PLAN = {"2026-11-09": "Jaylen Wells", "2026-11-10": "Pelle Larsson"}  # Tommy 選好的:美國日期 → 要撿的人(放掉目前串流位的人)
 WINDOW = timedelta(minutes=120)     # 第一場開打前多久開始動作(越晚傷況越清楚,但 GitHub 排程會延遲)
 K = ("pts", "reb", "ast", "stl", "blk", "tpm", "tov", "fga", "fgm", "fta", "ftm")
 MAP = dict(zip(K, ("PTS", "REB", "AST", "STL", "BLK", "3PM", "TO", "FGA", "FGM", "FTA", "FTM")))
