@@ -14,6 +14,8 @@ ELLIS_GAME_DAY = "20261108"
 ALLEN = 4066328
 END = datetime(2026, 11, 16, 8, 0, tzinfo=timezone.utc)
 WEEK_END = date(2026, 11, 15)  # 美國週日
+INJURIES = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries"
+MIN_OUT_DAYS = 2  # 預計回歸日至少在 2 天後才算「缺好幾天」;ESPN 沒給日期也算
 ACTIVE_MAX = 13  # 先發 10 + 板凳 3
 
 
@@ -52,28 +54,66 @@ def main():
         return done("ellis_drop_done", "✅ 已放掉 Keon Ellis",
                     "他週日的數據照算。Allen 不再是 OUT 時會自動從 IR 移回來。")
 
-    if state.get("allen_back_done") or ellis:  # Ellis 還在名單 = 放人還沒生效,等 ESPN 換日
+    if ellis:  # Ellis 還在名單 = 放人還沒生效,等 ESPN 換日
         return
     allen = next((p for p in roster if p["id"] == ALLEN), None)
-    if not allen or allen["slot"] != a.IR or allen["status"] == "OUT":
+    if not allen:
         return
-    if sum(p["slot"] != a.IR for p in roster) >= ACTIVE_MAX:
+
+    if not state.get("allen_back_done"):
+        if allen["slot"] != a.IR or allen["status"] == "OUT":
+            return
+        if sum(p["slot"] != a.IR for p in roster) >= ACTIVE_MAX:
+            return
+        lg = espn_league.connect()
+        _, _, started, _, _ = a.schedule()
+        code, text = a.post({"teamId": team_id, "type": "ROSTER", "scoringPeriodId": lg.scoringPeriodId,
+                             "items": [{"playerId": ALLEN, "type": "LINEUP", "fromLineupSlotId": a.IR, "toLineupSlotId": a.BE}]})
+        if code >= 300:
+            return done("allen_back_done", "⚠️ Allen 沒移出 IR", f"ESPN 回應 {code}:{text}\n請手動處理。")
+        return done("allen_back_done", "✅ Allen 已移出 IR", f"Allen 現在是 {allen['status']}。{represet(started)}")
+
+    # Tommy 11/9:Allen 回來後如果又 OUT 好幾天,不用問,直接移 IR、撿本週剩下價值最高的自由球員(不放人)
+    if state.get("allen_ir_stream_done") or allen["slot"] == a.IR or allen["status"] != "OUT":
         return
+    days_out = out_days("Jarrett Allen")
+    if days_out is not None and days_out < MIN_OUT_DAYS:
+        return
+    state["allen_ir_stream_done"] = True
+    save_json(STATE_PATH, state)
     lg = espn_league.connect()
+    espn_league.refresh_build(lg)
     _, today, started, opp, tids = a.schedule()
-    code, text = a.post({"teamId": team_id, "type": "ROSTER", "scoringPeriodId": lg.scoringPeriodId,
-                         "items": [{"playerId": ALLEN, "type": "LINEUP", "fromLineupSlotId": a.IR, "toLineupSlotId": a.BE}]})
-    if code >= 300:
-        return done("allen_back_done", "⚠️ Allen 沒移出 IR", f"ESPN 回應 {code}:{text}\n請手動處理。")
-    # 之後每天的陣容已經先排好(沒有 Allen),所以從今天(已開打就從明天)到週日全部重排一次
+    first = today + 1 if started else today
+    picks = a.candidates(lg, opp, range(first, 7), tids)
+    if not picks:
+        return notify(cfg, "ℹ️ Allen OUT,沒撿人", "本週剩下的日子沒有合適的自由球員。", "Allen OUT")
+    a.run(ALLEN, picks[0][1].playerId)  # 移 IR + 撿人,結果它自己會通知
+    _, roster = a.my_entries()
+    if any(p["id"] == picks[0][1].playerId for p in roster):
+        msg = represet(started)
+        notify(cfg, "📋 先發已重排", msg, msg[:120])
+
+
+def out_days(name):
+    """ESPN 傷病表的預計回歸日距離今天(美國日期)幾天;沒有日期回傳 None。"""
+    for t in (get_json(INJURIES) or {}).get("injuries", []):
+        for i in t.get("injuries", []):
+            if i["athlete"]["displayName"] == name and (i.get("details") or {}).get("returnDate"):
+                back = date.fromisoformat(i["details"]["returnDate"][:10])
+                return (back - (datetime.now(timezone.utc) - timedelta(hours=a.ROLLOVER)).date()).days
+    return None
+
+
+def represet(started):
+    """之後每天的陣容已經先排好,名單一變就從今天(已開打就從明天)到週日全部重排。"""
     us_today = (datetime.now(timezone.utc) - timedelta(hours=a.ROLLOVER)).date()
     first = us_today + timedelta(days=1 if started else 0)
     days = [first + timedelta(i) for i in range((WEEK_END - first).days + 1)]
     bad = [f"{d:%m/%d}({c})" for d, _, c, *_ in preset.preset(days)] if days else []
     bad = [x for x in bad if not x.endswith("(200)")]
     when = "明天" if started else "今天"
-    msg = f"{when}到週日有比賽的人已排進先發。" if not bad else f"但這幾天排先發失敗:{'、'.join(bad)},請手動排。"
-    done("allen_back_done", "✅ Allen 已移出 IR", f"Allen 現在是 {allen['status']}。{msg}")
+    return f"{when}到週日有比賽的人已排進先發。" if not bad else f"但這幾天排先發失敗:{'、'.join(bad)},請手動排。"
 
 
 if __name__ == "__main__":
