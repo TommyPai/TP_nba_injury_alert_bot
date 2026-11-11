@@ -22,7 +22,7 @@ NEVER = {"Jarrett Allen", "Moussa Diabate"}
 OPP_NAME = "bbq chicken"
 WEEK = (date(2026, 11, 9), date(2026, 11, 15))
 PROPOSE_ONLY = True                 # True:只用 Telegram 推薦,不換人(Tommy 要每天自己選)
-PLAN = {"2026-11-09": "Jaylen Wells", "2026-11-10": "Precious Achiuwa"}  # Tommy 選好的:美國日期 → 要撿的人(名單有空位就不放人,否則放掉目前串流位的人)
+PLAN = {"2026-11-09": "Jaylen Wells", "2026-11-10": "Precious Achiuwa", "2026-11-11": "Reed Sheppard"}  # Tommy 選好的:美國日期 → 要撿的人(名單有空位就不放人,否則放掉目前串流位的人)
 ACTIVE_MAX = 13                     # 先發 10 + 板凳 3
 RETURN = ("Moussa Diabate", "Jaylen Wells")  # Tommy 11/10:Diabate 從 IR 回來那天(他有比賽、不是 OUT),放 Wells 讓位
 WINDOW = timedelta(minutes=120)     # 第一場開打前多久開始動作(越晚傷況越清楚,但 GitHub 排程會延遲)
