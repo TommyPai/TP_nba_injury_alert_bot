@@ -22,7 +22,7 @@ NEVER = {"Jarrett Allen", "Moussa Diabate"}
 OPP_NAME = "bbq chicken"
 WEEK = (date(2026, 11, 9), date(2026, 11, 15))
 PROPOSE_ONLY = True                 # True:只用 Telegram 推薦,不換人(Tommy 要每天自己選)
-PLAN = {"2026-11-09": "Jaylen Wells", "2026-11-10": "Precious Achiuwa", "2026-11-11": "Reed Sheppard"}  # Tommy 選好的:美國日期 → 要撿的人(名單有空位就不放人,否則放掉目前串流位的人)
+PLAN = {"2026-11-09": "Jaylen Wells", "2026-11-10": "Precious Achiuwa", "2026-11-11": "Reed Sheppard", "2026-11-15": "Tari Eason"}  # Tommy 選好的:美國日期 → 要撿的人(名單有空位就不放人,否則放掉目前串流位的人)
 ACTIVE_MAX = 13                     # 先發 10 + 板凳 3
 RETURN = ("Moussa Diabate", "Jaylen Wells")  # Tommy 11/10:Diabate 從 IR 回來那天(他有比賽、不是 OUT),放 Wells 讓位
 WINDOW = timedelta(minutes=120)     # 第一場開打前多久開始動作(越晚傷況越清楚,但 GitHub 排程會延遲)
@@ -220,6 +220,8 @@ def main():
     want = PLAN.get(key)
     if want:  # Tommy 已經選好今天的人
         chosen = next((r for r in options if r[1].name == want and r[2] == "add"), None)
+        if chosen and a.player_status(lg, chosen[1].playerId) == "WAIVERS" and now < tip - timedelta(minutes=15):
+            return print(want, "還在 waiver,下一輪再試", flush=True)  # Tommy 11/13:等 Eason 過 waiver 再搶
         if not chosen or a.player_status(lg, chosen[1].playerId) != "FREEAGENT":
             sc[key] = "error"
             save_json(STATE_PATH, state)
