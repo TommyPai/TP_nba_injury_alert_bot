@@ -6,10 +6,12 @@ from datetime import date, datetime, timedelta, timezone
 import auto_fix as a
 import espn_league
 import preset
-from nba_injury_alert import STATE_PATH, load_config, load_json, notify, save_json
+import weekly_stream as w
+from nba_injury_alert import STATE_PATH, get_json, load_config, load_json, notify, save_json
 
 BUTLER = 6430
 REAVES = "Austin Reaves"
+GOODWIN = "Jordan Goodwin"
 ACTIVE_MAX = 13  # 先發 10 + 板凳 3
 DROP = "Alex Caruso"
 START = datetime(2026, 11, 17, 8, 0, tzinfo=timezone.utc)
@@ -19,9 +21,12 @@ WEEK_END = date(2026, 11, 22)
 
 def main():
     now = datetime.now(timezone.utc)
-    if not START <= now < END:
+    if now >= END:
         return
     state = load_json(STATE_PATH, {})
+    goodwin_drop(state)
+    if now < START:
+        return
     if state.get("jb_back_done"):
         return reaves_back(now, state)
     cfg = load_config()
@@ -47,9 +52,11 @@ def main():
     if not cut:
         return done("⚠️ Butler 沒撿回來", f"名單上找不到 {DROP},為了安全不動任何人。")
     sp = lg.scoringPeriodId
-    code, text = a.post({"teamId": team_id, "type": "FREEAGENT", "scoringPeriodId": sp, "items": [
-        {"playerId": BUTLER, "type": "ADD", "toTeamId": team_id},
-        {"playerId": cut["id"], "type": "DROP", "fromTeamId": team_id}]})
+    room = sum(p["slot"] != a.IR for p in roster) < ACTIVE_MAX  # Goodwin 放掉後有空位,就不用放 Caruso
+    items = [{"playerId": BUTLER, "type": "ADD", "toTeamId": team_id}]
+    if not room:
+        items.append({"playerId": cut["id"], "type": "DROP", "fromTeamId": team_id})
+    code, text = a.post({"teamId": team_id, "type": "FREEAGENT", "scoringPeriodId": sp, "items": items})
     if code >= 300:
         return done("⚠️ Butler 沒撿回來", f"ESPN 回應 {code}:{text[:300]}\n{DROP} 還在,請手動處理。")
     code, text = a.post({"teamId": team_id, "type": "ROSTER", "scoringPeriodId": sp, "items": [
@@ -59,11 +66,35 @@ def main():
     days = [us_today + timedelta(i) for i in range((WEEK_END - us_today).days + 1)]
     bad = [f"{d:%m/%d}({c})" for d, _, c, *_ in preset.preset(days) if c >= 300]
     _, after = a.my_entries()
-    ok = any(p["id"] == BUTLER for p in after) and not any(p["name"] == DROP for p in after)
+    ok = any(p["id"] == BUTLER for p in after) and (room or not any(p["name"] == DROP for p in after))
     done("✅ Butler 撿回來了" if ok else "⚠️ Butler 撿人未確認",
-         f"已放 {DROP}、撿回 Butler。{ir}。" + (f"排先發失敗:{'、'.join(bad)}。" if bad else "本週先發已重排。")
+         ("名單有空位沒放人," if room else f"已放 {DROP}、") + f"撿回 Butler。{ir}。" + (f"排先發失敗:{'、'.join(bad)}。" if bad else "本週先發已重排。")
          + ("" if ok else " ESPN 名單上還沒看到變化,請到 ESPN 確認。"))
 
+
+def goodwin_drop(state):
+    """Tommy 11/17:Goodwin 打完美國 11/16 PHX@DEN 就放掉(他當天數據照算)。"""
+    if state.get("goodwin_drop_done"):
+        return
+    ev = next((ev for ev in (get_json(w.SCOREBOARD.format(d="20261116")) or {}).get("events", [])
+               if any(c["team"]["abbreviation"] == "PHX" for c in ev["competitions"][0]["competitors"])), None)
+    if not ev or not ev["status"]["type"].get("completed"):
+        return
+    cfg = load_config()
+    state["goodwin_drop_done"] = True
+    save_json(STATE_PATH, state)
+    team_id, roster = a.my_entries()
+    g = next((p for p in roster if p["name"] == GOODWIN), None)
+    if not g:
+        return notify(cfg, "ℹ️ Goodwin 已不在名單", "沒有動作。", "Goodwin")
+    lg = espn_league.connect()
+    code, text = a.post({"teamId": team_id, "type": "ROSTER", "scoringPeriodId": lg.scoringPeriodId,
+                         "items": [{"playerId": g["id"], "type": "DROP", "fromTeamId": team_id}]})
+    _, after = a.my_entries()
+    ok = code < 300 and not any(p["name"] == GOODWIN for p in after)
+    body = "Goodwin 已放掉,名單空出一格(Reaves 回來 / 串流用)。" if ok else f"⚠️ ESPN 回應 {code}:{text[:300]} 請到 ESPN 確認。"
+    print(body, flush=True)
+    notify(cfg, "✅ 已放 Goodwin" if ok else "⚠️ Goodwin 沒放成", body, body[:120])
 
 
 def reaves_back(now, state):

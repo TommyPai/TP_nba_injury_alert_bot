@@ -167,7 +167,9 @@ def main():
     team_id = me.team_id
     slot_name = sc.get("current") or FIRST_SLOT
     cur = next((p for p in me.roster if p.name == slot_name), None)
-    if not cur or cur.name in NEVER:
+    empty = not cur and sum(x.lineupSlot != "IR" for x in me.roster) < ACTIVE_MAX  # 11/17:名單有空位就當串流位是空的
+    cname = cur.name if cur else "(空位)"
+    if (not cur and not empty) or (cur and cur.name in NEVER):
         if args.dry:
             return print("找不到串流位", slot_name, flush=True)
         sc[key] = "error"
@@ -197,12 +199,12 @@ def main():
     act = lambda s: fin({k: float((s.get(MAP[k]) or {}).get("value", 0) or 0) for k in K})
     mine_now, opp_now = act(box.home_stats if home else box.away_stats), act(box.away_stats if home else box.home_stats)
     rest = days[i0:]
-    base = add(mine_now, w.project([p for p in me.roster if p.playerId != cur.playerId], rest, pid_team, e.YEAR, 10))
+    base = add(mine_now, w.project([p for p in me.roster if not cur or p.playerId != cur.playerId], rest, pid_team, e.YEAR, 10))
     opp_tot = add(opp_now, w.project(opp_team.roster, rest, pid_team, e.YEAR, 10))
 
     options = []
-    cs = season_stats(cur.playerId, e.YEAR, get_json)
-    ct = pid_team.get(str(cur.playerId))
+    cs = season_stats(cur.playerId, e.YEAR, get_json) if cur else None
+    ct = pid_team.get(str(cur.playerId)) if cur else None
     if cs and ct in days[i0] and (cur.injuryStatus or "ACTIVE") != "OUT":
         options.append((score(add(base, game(cs, opp_of[i0][ct], f_off, f_stl)), opp_tot), cur, "keep"))
     else:
@@ -226,17 +228,17 @@ def main():
             sc[key] = "error"
             save_json(STATE_PATH, state)
             return notify(load_config(), "⚠️ 串流沒換",
-                          f"{want} 今天不能撿(不是健康的自由球員或今天沒比賽),{cur.name} 還在。請告訴 Claude 換誰。", "串流沒換")
+                          f"{want} 今天不能撿(不是健康的自由球員或今天沒比賽),{cname} 還在。請告訴 Claude 換誰。", "串流沒換")
         options = [chosen]
     elif PROPOSE_ONLY and not args.dry:  # Tommy 11/9:每天的人要他自己決定,只推薦前三名,不送出
         top = [r for r in options if r[2] == "keep" or a.player_status(lg, r[1].playerId) == "FREEAGENT"][:4]
         dr, rk = team_drtg(team_ids)
         lg_avg = sum(dr.values()) / len(dr) if dr else 0
-        lines = [f"今天串流位是 {cur.name}。候選(預估本週 贏−輸 類別數,拉鋸推進;"
+        lines = [f"今天串流位是 {cname}。候選(預估本週 贏−輸 類別數,拉鋸推進;"
                  f"對手防守效率=每100回合失分,聯盟平均 {lg_avg:.1f},排名1=最差):"]
         for (net, push), p, kind in top:
             if kind == "keep":
-                lines.append(f"・留 {cur.name}:{net:+d} 類({push:.2f})")
+                lines.append(f"・留 {cname}:{net:+d} 類({push:.2f})")
                 continue
             s = season_stats(p.playerId, e.YEAR, get_json)
             tm = pid_team.get(str(p.playerId))
@@ -255,16 +257,16 @@ def main():
             break
     (net, push), p, kind = pick
     line = f"預估 {'+' if net >= 0 else ''}{net} 類(拉鋸推進 {push:.2f})"
-    print(us_today, "串流位", cur.name, "→", p.name, kind, line, flush=True)
+    print(us_today, "串流位", cname, "→", p.name if p else cname, kind, line, flush=True)
     if args.dry:
         for sc_, q, k in options[:8]:
-            print("  ", q.name, k, sc_)
+            print("  ", q.name if q else cname, k, sc_)
         return
     cfg = load_config()
     if kind == "keep":
         sc[key] = "keep"
         save_json(STATE_PATH, state)
-        return notify(cfg, "ℹ️ 串流不換", f"今天留著 {cur.name}。{line}", "串流不換")
+        return notify(cfg, "ℹ️ 串流不換", f"今天留著 {cname}。{line}", "串流不換")
     if a.adds_left(lg, team_id, i0) <= 0:
         sc[key] = "no_adds"
         save_json(STATE_PATH, state)
@@ -277,7 +279,7 @@ def main():
     if code >= 300:
         sc[key] = "error"
         save_json(STATE_PATH, state)
-        return notify(cfg, "⚠️ 串流沒換", f"ESPN 回應 {code}:{text}\n沒有重試,{cur.name} 還在。", "串流沒換")
+        return notify(cfg, "⚠️ 串流沒換", f"ESPN 回應 {code}:{text}\n沒有重試,{cname} 還在。", "串流沒換")
     sc[key], sc["current"] = p.name, p.name
     save_json(STATE_PATH, state)
     _, ros = a.my_entries()  # 確認 ESPN 名單真的有他(開打後才撿會隔天生效)
@@ -286,7 +288,7 @@ def main():
     days_left = [us_today + timedelta(j) for j in range((WEEK[1] - us_today).days + 1)]
     bad = [f"{d:%m/%d}({c})" for d, _, c, *_ in preset.preset(days_left) if c >= 300]
     s = season_stats(p.playerId, e.YEAR, get_json)
-    body = (("名單有空位,沒放人;" if room else f"放 {cur.name}、") + f"撿 {p.name}(今天對 {opp_of[i0][pid_team.get(str(p.playerId))]})。"
+    body = (("名單有空位,沒放人;" if room else f"放 {cname}、") + f"撿 {p.name}(今天對 {opp_of[i0][pid_team.get(str(p.playerId))]})。"
             f"本季 {s['pts']:.1f}分 {s['reb']:.1f}板 {s['ast']:.1f}助 {s['stl']:.1f}抄 {s['tov']:.1f}失誤。{line}"
             + (f"\n排先發失敗:{'、'.join(bad)},請手動排。" if bad else "\n今天到週日陣容已重排。"))
     notify(cfg, f"🔄 串流:{p.name}", body, body[:120])
