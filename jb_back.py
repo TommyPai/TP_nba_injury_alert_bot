@@ -25,10 +25,11 @@ def main():
         return
     state = load_json(STATE_PATH, {})
     goodwin_drop(state)
-    if now < START:
+    # ESPN:IR 裡有不是 OUT 的人就不能撿人,所以 Goodwin 放掉後先把 Reaves 移出 IR,再撿 Butler
+    if state.get("goodwin_drop_done"):
+        reaves_back(now, state)
+    if now < START or state.get("jb_back_done"):
         return
-    if state.get("jb_back_done"):
-        return reaves_back(now, state)
     cfg = load_config()
 
     def done(head, body):
@@ -48,11 +49,13 @@ def main():
         return done("ℹ️ Butler 已在名單", "沒有動作。")
     if sum(p["slot"] == a.IR for p in roster) >= a.IR_SLOTS:
         return done("⚠️ Butler 沒撿回來", "IR 已滿,沒有動作。請手動處理。")
+    if any(p["slot"] == a.IR and p["status"] != "OUT" for p in roster):
+        return print("IR 裡有人不是 OUT,ESPN 不讓撿人,等 Reaves 移出", flush=True)
     cut = next((p for p in roster if p["name"] == DROP), None)
-    if not cut:
-        return done("⚠️ Butler 沒撿回來", f"名單上找不到 {DROP},為了安全不動任何人。")
+    room = sum(p["slot"] != a.IR for p in roster) < ACTIVE_MAX  # 有空位就不用放 Caruso
+    if not room and not cut:
+        return done("⚠️ Butler 沒撿回來", f"名單滿了,也找不到 {DROP},為了安全不動任何人。")
     sp = lg.scoringPeriodId
-    room = sum(p["slot"] != a.IR for p in roster) < ACTIVE_MAX  # Goodwin 放掉後有空位,就不用放 Caruso
     items = [{"playerId": BUTLER, "type": "ADD", "toTeamId": team_id}]
     if not room:
         items.append({"playerId": cut["id"], "type": "DROP", "fromTeamId": team_id})
