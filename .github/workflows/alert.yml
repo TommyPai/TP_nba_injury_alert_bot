@@ -58,6 +58,11 @@ jobs:
         continue-on-error: true
         run: python3 ellis_drop.py
 
+      - name: Re-claim Butler after waivers
+        if: ${{ !inputs.test }}
+        continue-on-error: true
+        run: python3 jb_back.py
+
       - name: Daily streaming slot
         if: ${{ !inputs.test }}
         continue-on-error: true
