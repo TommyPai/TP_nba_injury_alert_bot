@@ -9,6 +9,8 @@ import preset
 from nba_injury_alert import STATE_PATH, load_config, load_json, notify, save_json
 
 BUTLER = 6430
+REAVES = "Austin Reaves"
+ACTIVE_MAX = 13  # 先發 10 + 板凳 3
 DROP = "Alex Caruso"
 START = datetime(2026, 11, 17, 8, 0, tzinfo=timezone.utc)
 END = datetime(2026, 11, 23, 8, 0, tzinfo=timezone.utc)
@@ -21,7 +23,7 @@ def main():
         return
     state = load_json(STATE_PATH, {})
     if state.get("jb_back_done"):
-        return
+        return reaves_back(now, state)
     cfg = load_config()
 
     def done(head, body):
@@ -61,6 +63,44 @@ def main():
     done("✅ Butler 撿回來了" if ok else "⚠️ Butler 撿人未確認",
          f"已放 {DROP}、撿回 Butler。{ir}。" + (f"排先發失敗:{'、'.join(bad)}。" if bad else "本週先發已重排。")
          + ("" if ok else " ESPN 名單上還沒看到變化,請到 ESPN 確認。"))
+
+
+
+def reaves_back(now, state):
+    """Reaves 不再是 OUT 就從 IR 移回名單(撿回 Butler 後名單剛好空一格);名單滿了才放 Caruso(串流位)。"""
+    if state.get("reaves_back_done"):
+        return
+    team_id, roster = a.my_entries()
+    r = next((p for p in roster if p["name"] == REAVES), None)
+    if not r or r["slot"] != a.IR or r["status"] == "OUT":
+        return
+    cfg = load_config()
+    state["reaves_back_done"] = True
+    save_json(STATE_PATH, state)
+    lg = espn_league.connect()
+    sp = lg.scoringPeriodId
+    msg = ""
+    if sum(p["slot"] != a.IR for p in roster) >= ACTIVE_MAX:
+        cut = next((p for p in roster if p["name"] == DROP), None)
+        if not cut:
+            return notify(cfg, "⚠️ Reaves 沒移出 IR", f"名單滿了,也找不到 {DROP},請手動處理。", "IR 沒動")
+        code, text = a.post({"teamId": team_id, "type": "ROSTER", "scoringPeriodId": sp,
+                             "items": [{"playerId": cut["id"], "type": "DROP", "fromTeamId": team_id}]})
+        if code >= 300:
+            return notify(cfg, "⚠️ Reaves 沒移出 IR", f"放 {DROP} 失敗:ESPN {code}:{text[:300]}", "IR 沒動")
+        msg = f"已放 {DROP},"
+    code, text = a.post({"teamId": team_id, "type": "ROSTER", "scoringPeriodId": sp, "items": [
+        {"playerId": r["id"], "type": "LINEUP", "fromLineupSlotId": a.IR, "toLineupSlotId": a.BE}]})
+    if code >= 300:
+        return notify(cfg, "⚠️ Reaves 沒移出 IR", f"ESPN 回應 {code}:{text[:300]} 請手動處理。", "IR 沒動")
+    us_today = (now - timedelta(hours=8)).date()
+    days = [us_today + timedelta(i) for i in range((WEEK_END - us_today).days + 1)]
+    bad = [f"{d:%m/%d}({c})" for d, _, c, *_ in preset.preset(days) if c >= 300]
+    _, after = a.my_entries()
+    ok = any(p["name"] == REAVES and p["slot"] != a.IR for p in after)
+    body = msg + ("Reaves 已移回名單" if ok else "⚠️ ESPN 上 Reaves 還在 IR") + (f"。排先發失敗:{'、'.join(bad)}。" if bad else "。本週先發已重排。")
+    print(body, flush=True)
+    notify(cfg, "🔄 Reaves 回來", body, body[:120])
 
 
 if __name__ == "__main__":
