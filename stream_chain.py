@@ -22,9 +22,10 @@ NEVER = {"Jarrett Allen", "Moussa Diabate"}
 OPP_NAME = "GG Fricken Ez"
 WEEK = (date(2026, 11, 16), date(2026, 11, 22))
 PROPOSE_ONLY = True                 # True:只用 Telegram 推薦,不換人(Tommy 要每天自己選)
-PLAN = {}  # Tommy 選好的:美國日期 → 要撿的人(名單有空位就不放人,否則放掉目前串流位的人)
+PLAN = {"2026-11-18": "Sam Hauser"}  # Tommy 選好的:美國日期 → 要撿的人(名單有空位就不放人,否則放掉目前串流位的人)
 ACTIVE_MAX = 13                     # 先發 10 + 板凳 3
 RETURN = ("Moussa Diabate", "Jaylen Wells")  # Tommy 11/10:Diabate 從 IR 回來那天(他有比賽、不是 OUT),放 Wells 讓位
+AFTER_REAVES = {"2026-11-18"}  # Tommy 11/17:Reaves 回來、bot 放掉 Shamet 後,才用 Hauser 換 Caruso
 WINDOW = timedelta(minutes=120)     # 第一場開打前多久開始動作(越晚傷況越清楚,但 GitHub 排程會延遲)
 K = ("pts", "reb", "ast", "stl", "blk", "tpm", "tov", "fga", "fgm", "fta", "ftm")
 MAP = dict(zip(K, ("PTS", "REB", "AST", "STL", "BLK", "3PM", "TO", "FGA", "FGM", "FTA", "FTM")))
@@ -152,6 +153,8 @@ def main():
     key = us_today.isoformat()
     if sc.get(key) and not args.dry:
         return
+    if PLAN.get(key) and key in AFTER_REAVES and not state.get("reaves_back_done") and not args.dry:
+        return print("等 Reaves 移出 IR(jb_back 放掉 Shamet)才換", PLAN[key], flush=True)
     events = (get_json(w.SCOREBOARD.format(d=us_today.strftime("%Y%m%d"))) or {}).get("events", [])
     if not events:
         return
