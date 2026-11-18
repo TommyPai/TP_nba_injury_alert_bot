@@ -22,7 +22,7 @@
     "4065733:Out",
     "4066261:Day-To-Day",
     "4066336:Out",
-    "4066457:Out",
+    "4066457:Day-To-Day",
     "4066757:Out",
     "4277961:Out",
     "4279888:Out",
@@ -51,7 +51,7 @@
     "4432823:Out",
     "4432907:Out",
     "4433076:Out",
-    "4433136:Out",
+    "4433136:Day-To-Day",
     "4433247:Out",
     "4433255:Out",
     "4433621:Out",
@@ -130,5 +130,6 @@
   "ir_back_done": true,
   "allen_ir_stream_done": true,
   "goodwin_drop_done": true,
-  "jb_back_done": true
+  "jb_back_done": true,
+  "reaves_back_done": true
 }
