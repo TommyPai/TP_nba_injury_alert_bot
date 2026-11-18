@@ -80,11 +80,9 @@ def schedule():
 
 
 def adds_left(lg, team_id, today):
-    """每個計分日累積 1 次,這週已用的從 ESPN 讀。"""
-    d = lg.espn_request.league_get(params={"view": "mTeam"})
-    t = next(x for x in d["teams"] if x["id"] == team_id)
-    used = t["transactionCounter"]["matchupAcquisitionTotals"].get(str(lg.currentMatchupPeriod), 0)
-    return today + 1 - used
+    """11/18 檢討:原本假設「每天累積 1 次」是錯的(11/17、11/18 同一天各撿 2 人 ESPN 都接受)。
+    不在本地擋,撿不撿得到以 ESPN 回應為準。"""
+    return 99
 
 
 def opponent_factors(tids):
@@ -182,7 +180,7 @@ def offer_text(p, team_id, roster):
     picks = candidates(lg, opp, days, tids)
     if not picks:
         return f"本週剩下的日子沒有合適的自由球員。{note}"
-    lines = [note, f"這週還能撿 {left} 次。點指令才會動手:移 {p['name']} 到 IR、撿人,不放任何人。", ""]
+    lines = [note, f"點指令才會動手:移 {p['name']} 到 IR、撿人,不放任何人。", ""]
     for total, c, games, s in picks:
         lines.append(f"{c.name}({'/'.join(x for x in ('PG', 'SG', 'SF', 'PF', 'C') if x in c.eligibleSlots)})"
                      f" 剩 {'、'.join('一二三四五六日'[i] + o for i, o in games)}")
