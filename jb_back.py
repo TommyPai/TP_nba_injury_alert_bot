@@ -14,6 +14,7 @@ REAVES = "Austin Reaves"
 GOODWIN = "Jordan Goodwin"
 ACTIVE_MAX = 13  # 先發 10 + 板凳 3
 DROP = "Alex Caruso"
+DROP_TEAM = "OKC"
 START = datetime(2026, 11, 17, 8, 0, tzinfo=timezone.utc)
 END = datetime(2026, 11, 23, 8, 0, tzinfo=timezone.utc)
 REAVES_FROM = datetime(2026, 11, 18, 8, 0, tzinfo=timezone.utc)  # 美國 11/18 才放串流的人,Shamet 11/17 那場要算
@@ -109,6 +110,11 @@ def reaves_back(now, state):
     r = next((p for p in roster if p["name"] == REAVES), None)
     if not r or r["slot"] != a.IR or r["status"] == "OUT":
         return
+    # Tommy 11/18:放 Caruso 留 Shamet;Caruso 的比賽打到一半就等打完再放
+    us_today = (now - timedelta(hours=8)).date()
+    for ev in (get_json(w.SCOREBOARD.format(d=us_today.strftime("%Y%m%d"))) or {}).get("events", []):
+        if any(c["team"]["abbreviation"] == DROP_TEAM for c in ev["competitions"][0]["competitors"]) and ev["status"]["type"].get("state") == "in":
+            return print(f"{DROP} 比賽進行中,打完再放", flush=True)
     cfg = load_config()
     state["reaves_back_done"] = True
     save_json(STATE_PATH, state)
@@ -116,20 +122,15 @@ def reaves_back(now, state):
     sp = lg.scoringPeriodId
     msg = ""
     if sum(p["slot"] != a.IR for p in roster) >= ACTIVE_MAX:
-        # Tommy 11/17:Reaves 回來放串流位的人(Shamet),之後串流位改由 Caruso 當
-        sc = state.setdefault("stream_chain", {})
-        drop = sc.get("current") or DROP
+        drop = DROP  # Tommy 11/18:改放 Caruso,Shamet 留著當串流位
         cut = next((p for p in roster if p["name"] == drop), None)
-        if not cut or drop in (REAVES, "Jarrett Allen", "Moussa Diabate"):
-            return notify(cfg, "⚠️ Reaves 沒移出 IR", f"名單滿了,也找不到串流位的 {drop},請手動處理。", "IR 沒動")
+        if not cut:
+            return notify(cfg, "⚠️ Reaves 沒移出 IR", f"名單滿了,也找不到 {drop},請手動處理。", "IR 沒動")
         code, text = a.post({"teamId": team_id, "type": "ROSTER", "scoringPeriodId": sp,
                              "items": [{"playerId": cut["id"], "type": "DROP", "fromTeamId": team_id}]})
         if code >= 300:
             return notify(cfg, "⚠️ Reaves 沒移出 IR", f"放 {drop} 失敗:ESPN {code}:{text[:300]}", "IR 沒動")
-        msg = f"已放串流位的 {drop},"
-        if drop != DROP:
-            sc["current"] = DROP
-            save_json(STATE_PATH, state)
+        msg = f"已放 {drop},"
     code, text = a.post({"teamId": team_id, "type": "ROSTER", "scoringPeriodId": sp, "items": [
         {"playerId": r["id"], "type": "LINEUP", "fromLineupSlotId": a.IR, "toLineupSlotId": a.BE}]})
     if code >= 300:
