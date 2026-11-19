@@ -63,6 +63,11 @@ jobs:
         continue-on-error: true
         run: python3 jb_back.py
 
+      - name: Swap McCain for Traore on 11/23
+        if: ${{ !inputs.test }}
+        continue-on-error: true
+        run: python3 traore_add.py
+
       - name: Daily streaming slot
         if: ${{ !inputs.test }}
         continue-on-error: true
