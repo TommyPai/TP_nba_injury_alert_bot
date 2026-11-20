@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""一次性(Tommy 11/20):美國 11/23 ESPN 換日後、第一場開打前,放 McCain、撿 Nolan Traore(BKN,長期留),
+"""一次性(Tommy 11/20):美國 11/23 ESPN 換日後、第一場開打前,放串流位(原 McCain,11/20 換成 Mykhailiuk)、撿 Nolan Traore(BKN,長期留),
 再排好 11/23–11/29 的先發。只做一次(記在 state.json)。
 安全條件:Traore 必須是 FREEAGENT 而且 ESPN 狀態 ACTIVE(DTD / OUT 都不動,只通知 Tommy)。"""
 from datetime import date, datetime, timedelta, timezone
@@ -10,7 +10,7 @@ import preset
 from nba_injury_alert import STATE_PATH, load_config, load_json, notify, save_json
 
 ADD_ID, ADD = 5279130, "Nolan Traore"
-DROP = "Jared McCain"
+DROP = "Svi Mykhailiuk"
 DAY = date(2026, 11, 23)
 SP = preset.BASE_SP + (DAY - preset.BASE_DAY).days
 START = datetime(2026, 11, 23, 8, 0, tzinfo=timezone.utc)  # ESPN 換到 11/23
