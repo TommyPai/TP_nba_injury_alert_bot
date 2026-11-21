@@ -80,9 +80,21 @@ def schedule():
 
 
 def adds_left(lg, team_id, today):
-    """11/18 檢討:原本假設「每天累積 1 次」是錯的(11/17、11/18 同一天各撿 2 人 ESPN 都接受)。
-    不在本地擋,撿不撿得到以 ESPN 回應為準。"""
-    return 99
+    """本週(這個對戰週)還能撿幾人。11/21 確認:ESPN 上限 = matchupAcquisitionLimit(1)× 7 天 = 每週 7 次,
+    哪天用都可以;第 8 次會被 409 TRAN_ACQUISITION_LIMIT_EXCEEDED_MATCHUP 擋。"""
+    try:
+        r = lg.espn_request.league_get(params={"view": ["mSettings", "mTeam"]})
+        acq = r["settings"]["acquisitionSettings"]
+        lim = acq.get("matchupAcquisitionLimit", -1)
+        if lim is None or lim < 0:
+            return 99
+        cap = int(lim * (7 if acq.get("matchupLimitPerScoringPeriod") else 1))
+        team = next(t for t in r["teams"] if t["id"] == team_id)
+        used = (team.get("transactionCounter") or {}).get("matchupAcquisitionTotals", {}).get(str(lg.currentMatchupPeriod), 0)
+        return cap - int(used)
+    except Exception as ex:  # 讀不到就不在本地擋,以 ESPN 回應為準
+        print("adds_left 讀取失敗:", ex)
+        return 99
 
 
 def opponent_factors(tids):
