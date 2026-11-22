@@ -32,6 +32,8 @@ MAP = dict(zip(K, ("PTS", "REB", "AST", "STL", "BLK", "3PM", "TO", "FGA", "FGM",
 TH = {k: th for _, k, th in w.CATS}
 
 
+RESERVE = 1  # 週一~週四串流至少留這麼多次撿人給週末(每週上限 7)
+
 def fin(t):
     return {**t, "fg": t["fgm"] / t["fga"] if t["fga"] else 0, "ft": t["ftm"] / t["fta"] if t["fta"] else 0}
 
@@ -179,7 +181,7 @@ def main():
         save_json(STATE_PATH, state)
         return notify(load_config(), "⚠️ 串流沒換", f"名單上找不到串流位的 {slot_name},為了安全不動任何人。", "串流沒換")
 
-    i0 = (us_today - WEEK[0]).days
+    i0 = (us_today - WEEK[0]).days  # 0 = 週一
     _, team_ids, days = w.games_this_week(WEEK[0])
     opp_of = [{} for _ in range(7)]
     for i in range(7):
@@ -249,6 +251,8 @@ def main():
             lines.append(f"・{p.name}({tm} 對 {o}):{net:+d} 類({push:.2f})"
                          f" {s['pts']:.1f}分 {s['reb']:.1f}板 {s['ast']:.1f}助 {s['stl']:.1f}抄 {s['blk']:.1f}帽 {s['tov']:.1f}失誤")
             lines.append(f"   {o} 防守效率 {dr.get(o, 0):.1f}(第 {rk.get(o, '?')} 差);{matchup(p.name, tm, o, team_ids)}")
+        left = a.adds_left(lg, team_id, i0)
+        lines.append(f"本週還能撿 {left} 次" + ("(週一~週四要留 1 次給週末,今天建議不換)" if i0 <= 3 and left <= RESERVE else "") + "。")
         lines.append("要換誰告訴 Claude。")
         sc[key] = "proposed"
         save_json(STATE_PATH, state)
@@ -270,10 +274,15 @@ def main():
         sc[key] = "keep"
         save_json(STATE_PATH, state)
         return notify(cfg, "ℹ️ 串流不換", f"今天留著 {cname}。{line}", "串流不換")
-    if a.adds_left(lg, team_id, i0) <= 0:
+    left = a.adds_left(lg, team_id, i0)
+    if left <= 0:
         sc[key] = "no_adds"
         save_json(STATE_PATH, state)
         return notify(cfg, "⚠️ 串流沒換", "這週撿人額度用完了。", "串流沒換")
+    if i0 <= 3 and left <= RESERVE:  # 週一~週四:留 1 次給週末臨時 OUT(11/21 檢討)
+        sc[key] = "reserve"
+        save_json(STATE_PATH, state)
+        return notify(cfg, "ℹ️ 串流沒換", f"本週只剩 {left} 次撿人,留給週五以後補臨時缺陣的人。{line}", "串流沒換")
     room = sum(x.lineupSlot != "IR" for x in me.roster) < ACTIVE_MAX  # 有空位就只撿不放
     items = [{"playerId": p.playerId, "type": "ADD", "toTeamId": team_id}]
     if not room:
