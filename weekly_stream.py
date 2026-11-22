@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import espn_league
-from blend import BUILD_NAME, blended_stats, build_value, season_stats as _season_stats
+from blend import BUILD_NAME, blended_stats, build_value, pick_value, season_stats as _season_stats
 from nba_injury_alert import get_json, load_config, notify
 
 BASE = Path(__file__).resolve().parent
@@ -271,7 +271,7 @@ def main():
     for (abbr, _, name), s in zip(pool, stats):
         if not s or s.get("min", 0) < MIN_MINUTES:
             continue
-        cands.append((cade_value(s, boost) * games[abbr], name, abbr, s))
+        cands.append((pick_value(s, boost) * games[abbr], name, abbr, s))  # 撿人用選人系統(11/22)
     cands.sort(key=lambda c: -c[0])
 
     end = start + timedelta(days=6)

@@ -100,6 +100,19 @@ def build_value(s, boost=()):
     return sum(WEIGHTS[k] * (2.0 if k in boost else 1.0) * v for k, v in build_z(s).items())
 
 
+# 選人系統(Tommy 11/22 定,比照 Yahoo):撿自由球員/waiver 用。已領先的類別少抓、五五波的類別抓滿。
+# 依 11/22 第 2–4 週 z:FG% +1.28、阻攻 +0.71 → 降權;籃板 +0.25、抄截 +0.26、助攻 0.00、失誤 +0.27 → 1。
+# 交易、丟長期球員、排先發仍用 WEIGHTS(打法系統)。每週重看 z,領先被追近就把權重往上調(先問 Tommy)。
+PICK_WEIGHTS = {"fg": 0.5, "blk": 0.75, "reb": 1.0, "stl": 1.0, "ast": 1.0, "tov": 1.0,
+                "pts": 0.5, "tpm": 0.5, "ft": 0.0}
+
+
+def pick_value(s, boost=()):
+    """選人系統的單場價值:權重用 PICK_WEIGHTS;某類被 refresh_build 判定追不上(WEIGHTS 歸 0)時也歸 0。"""
+    return sum((PICK_WEIGHTS[k] if WEIGHTS.get(k) else 0.0) * (2.0 if k in boost else 1.0) * v
+               for k, v in build_z(s).items())
+
+
 def build_per_min(s):
     """每分鐘價值(依 WEIGHTS 的打法)。"""
     if not s or not s.get("min"):

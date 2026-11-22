@@ -16,7 +16,7 @@ import requests
 
 import espn_league
 import weekly_stream as w
-from blend import build_value, season_stats
+from blend import build_value, pick_value, season_stats
 from nba_injury_alert import STATE_PATH, get_json, load_config, load_json, log, notify, save_json
 
 READ = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/{y}/segments/0/leagues/{lid}"
@@ -123,7 +123,7 @@ def game_value(s, oppo, f_off, f_stl):
     for k in ("pts", "tpm", "ast", "fga", "fta"):
         t[k] = s[k] * f_off.get(oppo, 1)
     t["stl"] = s["stl"] * f_stl.get(oppo, 1)
-    return build_value(t)
+    return pick_value(t)  # 撿人用選人系統(11/22)
 
 
 def candidates(lg, opp, days, tids):
