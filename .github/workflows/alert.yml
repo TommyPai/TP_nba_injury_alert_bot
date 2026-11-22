@@ -73,6 +73,11 @@ jobs:
         continue-on-error: true
         run: python3 stream_chain.py
 
+      - name: Lineup guard (swap OUT starters before tip-off)
+        if: ${{ !inputs.test }}
+        continue-on-error: true
+        run: python3 lineup_guard.py
+
       - name: Save state
         if: ${{ !inputs.test }}
         run: |
