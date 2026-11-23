@@ -219,6 +219,8 @@ def main():
         tm = pid_team.get(str(p.playerId))
         if str(p.playerId) in taken or tm not in days[i0] or (p.injuryStatus or "ACTIVE") not in ("ACTIVE", "NORMAL"):
             continue
+        if a.pos_full(lg, me.roster, p, cur):  # C 最多 4 人
+            continue
         s = season_stats(p.playerId, e.YEAR, get_json)
         if not s or s["gp"] < 3 or s["min"] < 18:
             continue

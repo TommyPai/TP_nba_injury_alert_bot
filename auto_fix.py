@@ -136,7 +136,10 @@ def candidates(lg, opp, days, tids):
     taken = espn_league.rostered_ids(lg)
     f_off, f_stl = opponent_factors(tids)
     out = []
+    mine = espn_league.my_team(lg).roster
     for p in lg.free_agents(size=120):
+        if pos_full(lg, mine, p):
+            continue
         team = teams.get(str(p.playerId))
         if str(p.playerId) in taken or (p.injuryStatus or "ACTIVE") not in ("ACTIVE", "NORMAL"):
             continue
@@ -241,6 +244,28 @@ def set_lineup(lg, team_id, opp, today, tids):
     return post({"teamId": team_id, "type": "ROSTER", "scoringPeriodId": lg.scoringPeriodId, "items": items})
 
 
+_POS_LIM = None
+
+
+def pos_full(lg, roster, add, drop=None):
+    """聯盟限制每隊同一原始位置(ESPN defaultPosition)的人數,目前 C 最多 4 人(Tommy 11/23 提醒)。
+    roster/add/drop 是 espn_api Player;回傳 True 代表撿 add(放 drop)會超過上限。"""
+    global _POS_LIM
+    if _POS_LIM is None:
+        try:
+            _POS_LIM = lg.espn_request.league_get(params={"view": "mSettings"})["settings"]["rosterSettings"].get("positionLimits", {})
+        except Exception as ex:
+            print("positionLimits 讀取失敗:", ex)
+            _POS_LIM = {"5": 4}
+    lim = _POS_LIM
+    pos_id = {"PG": "1", "SG": "2", "SF": "3", "PF": "4", "C": "5"}.get(add.position)
+    cap = int(lim.get(pos_id, -1)) if pos_id else -1
+    if cap < 0:
+        return False
+    n = sum(1 for x in roster if x.position == add.position and (drop is None or x.playerId != drop.playerId))
+    return n >= cap
+
+
 def run(out_id, add_id):
     cfg = load_config()
     stop = lambda why: (print(why, flush=True), notify(cfg, "⚠️ 沒有換人", why, why[:120]))
@@ -258,6 +283,9 @@ def run(out_id, add_id):
     _, today, started, opp, tids = schedule()
     if adds_left(lg, team_id, today) <= 0:
         return stop("這週撿人額度用完了,沒有動作。")
+    fa = next((x for x in lg.free_agents(size=300) if x.playerId == add_id), None)
+    if fa and pos_full(lg, espn_league.my_team(lg).roster, fa):
+        return stop(f"{name} 是 {fa.position},隊上同位置已達聯盟上限,沒有動作。")
     code, text = post({"teamId": team_id, "type": "ROSTER", "scoringPeriodId": lg.scoringPeriodId,
                        "items": [{"playerId": out_id, "type": "LINEUP", "fromLineupSlotId": p["slot"], "toLineupSlotId": IR}]})
     if code >= 300:
