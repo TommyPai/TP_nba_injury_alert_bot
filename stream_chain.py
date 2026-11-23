@@ -19,8 +19,8 @@ from nba_injury_alert import STATE_PATH, get_json, load_config, load_json, notif
 
 FIRST_SLOT = "Brook Lopez"          # 串流位一開始的人
 NEVER = {"Jarrett Allen", "Moussa Diabate"}
-OPP_NAME = "GG Fricken Ez"
-WEEK = (date(2026, 11, 16), date(2026, 11, 22))
+OPP_NAME = "All Under Projections"
+WEEK = (date(2026, 11, 23), date(2026, 11, 29))
 PROPOSE_ONLY = True                 # True:只用 Telegram 推薦,不換人(Tommy 要每天自己選)
 PLAN = {}  # 11/18 Hauser 已取消(Tommy 11/18), Tommy 選好的:美國日期 → 要撿的人(名單有空位就不放人,否則放掉目前串流位的人)
 ACTIVE_MAX = 13                     # 先發 10 + 板凳 3
