@@ -197,6 +197,13 @@ def main():
         {"players": {"filterStatus": {"value": ["FREEAGENT"]}, "limit": 300, "sortPercOwned": {"sortPriority": 1, "sortAsc": False}}})})
     fa_meta = {p["id"]: p for p in r["players"] if (p["player"].get("injuryStatus") or "ACTIVE") != "OUT"}
     fa_players = {p.playerId: p for p in lg.free_agents(size=300)}
+    # 依擁有率排的前 300 名會漏人(例如 11/24 的 Grimes),補上 espn_api 自由球員名單裡缺的
+    miss = [pid for pid in fa_players if pid not in fa_meta]
+    if miss:
+        r2 = lg.espn_request.league_get(params={"view": "kona_player_info"}, headers={"x-fantasy-filter": json.dumps(
+            {"players": {"filterIds": {"value": miss}}})})
+        fa_meta.update({p["id"]: p for p in r2.get("players", [])
+                        if p.get("status") == "FREEAGENT" and (p["player"].get("injuryStatus") or "ACTIVE") != "OUT"})
     with ThreadPoolExecutor(16) as ex:
         cands = [x for x in ex.map(lambda pid: ent(pid, fa_meta[pid]["player"]["fullName"],
                                                    [SLOT_NAME[s] for s in fa_meta[pid]["player"]["eligibleSlots"] if s in SLOT_NAME]),
