@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 
 import auto_fix as a
+import preset
 import espn_league as e
 import stream_chain as S
 import weekly_stream as w
@@ -119,6 +120,23 @@ def main():
     home = box.home_team == me
     act = lambda s: S.fin({k: float((s.get(S.MAP[k]) or {}).get("value", 0) or 0) for k in S.K})
     mine_now, opp_now = act(box.home_stats if home else box.away_stats), act(box.away_stats if home else box.home_stats)
+    # ESPN 的本週累計要到換日後才更新;當天(或累計落後時)改用每日先發數據加總
+    daily = [dict.fromkeys(S.K, 0.0), dict.fromkeys(S.K, 0.0)]
+    for i in range(i0):
+        sp_i = preset.BASE_SP + ((W0 + timedelta(days=i)) - preset.BASE_DAY).days
+        bd = next(b for b in lg.box_scores(lg.currentMatchupPeriod, scoring_period=sp_i, matchup_total=False)
+                  if me in (b.home_team, b.away_team))
+        for j, lu in enumerate((bd.home_lineup, bd.away_lineup) if home else (bd.away_lineup, bd.home_lineup)):
+            for x in lu:
+                if x.slot_position in ("BE", "IR"):
+                    continue
+                st = x.points_breakdown or {}
+                for k in S.K:
+                    daily[j][k] += float(st.get(S.MAP[k], 0) or 0)
+    if daily[0]["fga"] > mine_now["fga"]:
+        mine_now = S.fin(daily[0])
+    if daily[1]["fga"] > opp_now["fga"]:
+        opp_now = S.fin(daily[1])
 
     def ent(p, name, elig, d_from=0):
         s = season_stats(p, e.YEAR, get_json)
